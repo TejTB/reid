@@ -49,7 +49,9 @@ export default function OnboardingChat() {
         body: JSON.stringify({ mode: 'onboarding', messages: seed }),
       });
       if (!res.ok) {
-        throw new Error(`reid ${res.status}`);
+        let bodyText = '';
+        try { bodyText = (await res.text()).slice(0, 200); } catch {}
+        throw new Error(`HTTP ${res.status}${bodyText ? ` — ${bodyText}` : ''}`);
       }
       const body = res.body as ReadableStream<Uint8Array> | null | undefined;
       if (body && typeof body.getReader === 'function') {
@@ -67,10 +69,11 @@ export default function OnboardingChat() {
         acc = await res.text();
         setStreamingText(acc);
       }
-    } catch {
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: "Something's off on my end. Try again." },
+        { role: 'assistant', content: `Something's off on my end. (${detail})` },
       ]);
       setStreamingText('');
       setIsStreaming(false);

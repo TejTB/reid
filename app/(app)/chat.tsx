@@ -329,7 +329,9 @@ export default function ChatScreen() {
         return;
       }
       if (!res.ok) {
-        throw new Error(`reid ${res.status}`);
+        let bodyText = '';
+        try { bodyText = (await res.text()).slice(0, 200); } catch {}
+        throw new Error(`HTTP ${res.status}${bodyText ? ` — ${bodyText}` : ''}`);
       }
       const sid = res.headers.get('X-Reid-Session-Id') ?? res.headers.get('x-reid-session-id');
       if (sid) {
@@ -352,10 +354,11 @@ export default function ChatScreen() {
         acc = await res.text();
         setStreamingText(acc);
       }
-    } catch {
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: "Something's off on my end. Try again." },
+        { role: 'assistant', content: `Something's off on my end. (${detail})` },
       ]);
       setStreamingText('');
       setIsStreaming(false);
