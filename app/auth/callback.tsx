@@ -1,16 +1,19 @@
 // reid://auth/callback — the deep link Supabase opens after the founder
 // clicks a magic-link email on this device.
 //
-// Two formats may land here:
-//   1. token_hash + type  — Supabase magic-link/email OTP. Resolve via
-//      supabase.auth.verifyOtp().
-//   2. access_token + refresh_token in either query or fragment — the
-//      direct-session format used by some Supabase setups. Resolve via
-//      supabase.auth.setSession().
+// Three formats may land here:
+//   1. code  — PKCE flow (the default in current supabase-js). Resolve via
+//      supabase.auth.exchangeCodeForSession(code).
+//   2. token_hash + type  — older email-OTP / magic-link format. Resolve
+//      via supabase.auth.verifyOtp().
+//   3. access_token + refresh_token in either query or fragment — implicit
+//      flow. Resolve via supabase.auth.setSession().
 //
-// On success we route into the root index.tsx, which decides whether to
-// continue onboarding or land in /(app)/home based on the user's
-// onboarding_complete flag.
+// On success we redirect to `/`, which decides whether to continue
+// onboarding or land in /(app)/home based on the user's onboarding_complete
+// flag. We confirm the session is persisted with getSession() before
+// navigating — without that, the root layout's auth guard can race the
+// route change and kick the user back to /login.
 
 import { useEffect } from 'react';
 import { View, ActivityIndicator } from 'react-native';
@@ -20,6 +23,7 @@ import { supabase } from '@/lib/supabase';
 import { C } from '@/constants/theme';
 
 type Params = {
+  code?: string | null;
   token_hash?: string | null;
   type?: string | null;
   access_token?: string | null;
@@ -30,6 +34,7 @@ function parseAll(url: string): Params {
   const parsed = Linking.parse(url);
   const qp = (parsed.queryParams ?? {}) as Record<string, unknown>;
   const out: Params = {
+    code: typeof qp.code === 'string' ? qp.code : null,
     token_hash: typeof qp.token_hash === 'string' ? qp.token_hash : null,
     type: typeof qp.type === 'string' ? qp.type : null,
     access_token: typeof qp.access_token === 'string' ? qp.access_token : null,
@@ -44,6 +49,10 @@ function parseAll(url: string): Params {
     const rt = sp.get('refresh_token');
     if (at) out.access_token = at;
     if (rt) out.refresh_token = rt;
+    if (!out.code) {
+      const c = sp.get('code');
+      if (c) out.code = c;
+    }
     if (!out.token_hash) {
       const th = sp.get('token_hash');
       if (th) out.token_hash = th;
@@ -68,29 +77,35 @@ export default function AuthCallback() {
           if (!cancelled) router.replace('/login');
           return;
         }
-        const { access_token, refresh_token, token_hash, type } = parseAll(target);
+        const { code, access_token, refresh_token, token_hash, type } = parseAll(target);
 
-        if (access_token && refresh_token) {
+        let established = false;
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          established = !error;
+        } else if (access_token && refresh_token) {
           const { error } = await supabase.auth.setSession({
             access_token,
             refresh_token,
           });
-          if (cancelled) return;
-          router.replace(error ? '/login' : '/');
-          return;
-        }
-
-        if (token_hash && type) {
+          established = !error;
+        } else if (token_hash && type) {
           const { error } = await supabase.auth.verifyOtp({
             token_hash,
             type: type as 'email' | 'magiclink',
           });
-          if (cancelled) return;
-          router.replace(error ? '/login' : '/');
+          established = !error;
+        }
+
+        if (cancelled) return;
+        if (!established) {
+          router.replace('/login');
           return;
         }
 
-        if (!cancelled) router.replace('/login');
+        const { data: { session } } = await supabase.auth.getSession();
+        if (cancelled) return;
+        router.replace(session ? '/' : '/login');
       } catch {
         if (!cancelled) router.replace('/login');
       }
