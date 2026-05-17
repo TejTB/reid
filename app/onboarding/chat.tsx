@@ -186,7 +186,7 @@ export default function OnboardingChat() {
           Reid
         </Text>
         <Text style={{ marginLeft: 'auto', color: Colors.textDim, fontFamily: Fonts.sansRegular, fontSize: 12 }}>
-          {Math.min(userTurnCount, 10)} / 10
+          {Math.min(userTurnCount, 3)} / 3
         </Text>
       </View>
 
