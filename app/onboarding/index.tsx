@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { supabase } from '@/lib/supabase';
 import { Colors } from '@/constants/colors';
 import { Fonts } from '@/constants/fonts';
 import LogoMark from '@/components/LogoMark';
@@ -32,6 +33,13 @@ export default function OnboardingIntro() {
     router.push('/onboarding/chat');
   }
 
+  // DEV ONLY — wipe the current session and bounce to /login. Remove once
+  // auth flows are stable.
+  async function handleReset() {
+    await supabase.auth.signOut();
+    router.replace('/login');
+  }
+
   return (
     <View
       style={{
@@ -44,6 +52,28 @@ export default function OnboardingIntro() {
         paddingBottom: insets.bottom + 32,
       }}
     >
+      {/* DEV ONLY — testing tool to wipe session. Remove once stable. */}
+      <Pressable
+        onPress={handleReset}
+        hitSlop={12}
+        style={{
+          position: 'absolute',
+          top: insets.top + 12,
+          right: 16,
+          zIndex: 10,
+        }}
+      >
+        <Text
+          style={{
+            fontFamily: Fonts.sansRegular,
+            fontSize: 12,
+            color: Colors.textDim,
+            textDecorationLine: 'underline',
+          }}
+        >
+          Reset
+        </Text>
+      </Pressable>
       <View style={{ width: '100%', maxWidth: 360, alignItems: 'center' }}>
         <LogoMark size={48} />
 
