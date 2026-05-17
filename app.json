@@ -11,7 +11,10 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.tbxgrows.reid"
+      "bundleIdentifier": "com.tbxgrows.reid",
+      "infoPlist": {
+        "NSUserNotificationsUsageDescription": "Reid will let you know when he has something for you."
+      }
     },
     "android": {
       "adaptiveIcon": {

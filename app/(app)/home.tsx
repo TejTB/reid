@@ -1,12 +1,19 @@
-import { useEffect, useState } from 'react';
-import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  Pressable,
+  ActivityIndicator,
+  RefreshControl,
+} from 'react-native';
 import { router } from 'expo-router';
 import { ArrowRight, Check } from 'lucide-react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Haptics from 'expo-haptics';
 import { supabase } from '@/lib/supabase';
-import { Colors } from '@/constants/colors';
-import { Fonts } from '@/constants/fonts';
+import { reidFetch } from '@/lib/api';
 import { registerPushToken } from '@/lib/notifications';
+import { C, F, R, S } from '@/constants/theme';
 
 type LoadedUser = {
   id: string;
@@ -14,10 +21,15 @@ type LoadedUser = {
   onboarding_complete: boolean;
   onboarding_summary: string | null;
   onboarding_task: string | null;
+  onboarding_task_completed_at: string | null;
   last_session_at: string | null;
   session_count: number;
   streak_days: number;
 };
+
+// Free plan caps at 3 sessions. After session 3, the bar is full and the
+// upgrade pressure starts on /upgrade.
+const FREE_SESSION_LIMIT = 3;
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -27,10 +39,11 @@ function greeting(): string {
 }
 
 function milestoneFor(sessionCount: number): string {
-  if (sessionCount <= 2) return 'Getting started';
-  if (sessionCount <= 4) return 'Building momentum';
-  if (sessionCount <= 9) return 'Pattern emerging';
-  return 'First checkpoint';
+  if (sessionCount <= 0) return 'Getting started';
+  if (sessionCount === 1) return 'Getting started';
+  if (sessionCount === 2) return 'Building momentum';
+  if (sessionCount >= FREE_SESSION_LIMIT) return 'Free limit reached';
+  return 'Almost there';
 }
 
 function streakTextFor(user: LoadedUser, now: Date = new Date()): string | null {
@@ -54,51 +67,67 @@ function streakTextFor(user: LoadedUser, now: Date = new Date()): string | null 
 export default function HomeScreen() {
   const [user, setUser] = useState<LoadedUser | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [taskDone, setTaskDone] = useState(false);
+  const [taskPending, setTaskPending] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      router.replace('/login');
+      return null;
+    }
+    const { data: row } = await supabase
+      .from('users')
+      .select(
+        'id, name, onboarding_complete, onboarding_summary, onboarding_task, onboarding_task_completed_at, last_session_at, session_count, streak_days',
+      )
+      .eq('auth_id', session.user.id)
+      .maybeSingle();
+    if (!row) {
+      router.replace('/login');
+      return null;
+    }
+    const typed = row as LoadedUser;
+    if (!typed.onboarding_complete) {
+      router.replace('/onboarding');
+      return null;
+    }
+    setUser(typed);
+    setTaskDone(Boolean(typed.onboarding_task_completed_at));
+    return typed;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        if (!cancelled) router.replace('/login');
-        return;
-      }
-      const { data: row } = await supabase
-        .from('users')
-        .select('id, name, onboarding_complete, onboarding_summary, onboarding_task, last_session_at, session_count, streak_days')
-        .eq('auth_id', session.user.id)
-        .maybeSingle();
-      if (cancelled) return;
-      if (!row) {
-        router.replace('/login');
-        return;
-      }
-      if (!row.onboarding_complete) {
-        router.replace('/onboarding');
-        return;
-      }
-      setUser(row as LoadedUser);
-      try {
-        const done = await AsyncStorage.getItem(`reid:task:${row.id}:0:done`);
-        if (!cancelled) setTaskDone(done === 'true');
-      } catch {
-      }
+      await load();
       if (!cancelled) setLoaded(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [load]);
 
   useEffect(() => {
     void registerPushToken();
   }, []);
 
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load]);
+
   if (!loaded || !user) {
     return (
-      <View style={{ flex: 1, backgroundColor: Colors.bgDark, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color={Colors.accent} />
+      <View
+        style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' }}
+      >
+        <ActivityIndicator color={C.red} />
       </View>
     );
   }
@@ -109,72 +138,106 @@ export default function HomeScreen() {
   const sessionCount = user.session_count ?? 0;
   const streakText = streakTextFor(user);
   const milestoneLabel = milestoneFor(sessionCount);
-  const progressPct = Math.min(100, (sessionCount / 10) * 100);
+  const progressPct = Math.min(100, (sessionCount / FREE_SESSION_LIMIT) * 100);
 
   async function toggleTask() {
-    if (!user) return;
+    if (!user || taskPending) return;
     const next = !taskDone;
+    setTaskPending(true);
     setTaskDone(next);
     try {
-      await AsyncStorage.setItem(`reid:task:${user.id}:0:done`, next ? 'true' : 'false');
-    } catch {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      const completedAt = next ? new Date().toISOString() : null;
+      const { error } = await supabase
+        .from('users')
+        .update({ onboarding_task_completed_at: completedAt })
+        .eq('id', user.id);
+      if (error) {
+        // Revert on failure so the UI stays truthful.
+        setTaskDone(!next);
+        return;
+      }
+      // Notify Reid so he can react in the next session.
+      if (next) {
+        try {
+          await reidFetch('/api/reid', {
+            method: 'POST',
+            body: JSON.stringify({
+              mode: 'chat',
+              messages: [
+                {
+                  role: 'user',
+                  content: `[system: I completed the task you set: "${task}"]`,
+                },
+              ],
+            }),
+          });
+        } catch {
+          // Best effort — the task completion already persisted.
+        }
+      }
+    } finally {
+      setTaskPending(false);
     }
   }
 
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: Colors.bgDark }}
-      contentContainerStyle={{ paddingHorizontal: 22, paddingTop: 60, paddingBottom: 40 }}
+      style={{ flex: 1, backgroundColor: C.bg }}
+      contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 60, paddingBottom: 32 }}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.red} />
+      }
     >
       <Text
         style={{
-          fontFamily: Fonts.serifRegular,
-          color: Colors.textPrimary,
-          fontSize: 36,
-          letterSpacing: -1.08,
-          lineHeight: 40,
+          fontFamily: F.serifReg,
+          color: C.text,
+          fontSize: 30,
+          letterSpacing: -0.6,
+          lineHeight: 36,
         }}
       >
         {greeting()}, {greetName}.
       </Text>
       <Text
         style={{
-          fontFamily: Fonts.sansRegular,
-          color: Colors.textDim,
-          fontSize: 16,
-          marginTop: 10,
+          fontFamily: F.sans,
+          color: C.muted,
+          fontSize: 14,
+          marginTop: 6,
         }}
       >
-        Here{"’"}s where things stand.
+        Here{"'"}s where things stand.
       </Text>
       {sessionCount > 0 && streakText && (
         <Text
           style={{
-            fontFamily: Fonts.sansRegular,
-            color: Colors.textDim,
-            fontSize: 13,
-            marginTop: 12,
+            fontFamily: F.sans,
+            color: C.muted,
+            fontSize: 12,
+            marginTop: 4,
           }}
         >
           Session {sessionCount} · {streakText}
         </Text>
       )}
 
-      <View style={{ marginTop: 36, gap: 16 }}>
+      <View style={{ marginTop: S.lg + 8, gap: S.md }}>
         <Card title="YOUR FOCUS">
           {summary ? (
             <Text
               style={{
-                fontFamily: Fonts.serifItalic,
-                color: Colors.textPrimary,
-                fontSize: 19,
-                lineHeight: 29,
+                fontFamily: F.serifItalic,
+                color: C.text,
+                fontSize: 17,
+                lineHeight: 26,
               }}
             >
               {summary}
             </Text>
           ) : (
-            <Text style={{ fontFamily: Fonts.sansRegular, color: Colors.textDim, fontSize: 14 }}>
+            <Text style={{ fontFamily: F.sans, color: C.muted, fontSize: 14 }}>
               Complete your first session with Reid.
             </Text>
           )}
@@ -191,12 +254,19 @@ export default function HomeScreen() {
                 style={{
                   width: `${progressPct}%`,
                   height: '100%',
-                  backgroundColor: Colors.accent,
+                  backgroundColor: C.red,
                 }}
               />
             </View>
-            <Text style={{ marginTop: 8, fontFamily: Fonts.sansRegular, fontSize: 11, color: Colors.textDim }}>
-              Session {sessionCount} of 10 — {milestoneLabel}
+            <Text
+              style={{
+                marginTop: 8,
+                fontFamily: F.sans,
+                fontSize: 12,
+                color: C.muted,
+              }}
+            >
+              Session {Math.min(sessionCount, FREE_SESSION_LIMIT)} of {FREE_SESSION_LIMIT} — {milestoneLabel}
             </Text>
           </View>
         </Card>
@@ -206,50 +276,61 @@ export default function HomeScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
               <Pressable
                 onPress={toggleTask}
+                disabled={taskPending}
+                hitSlop={10}
                 style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: 11,
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
                   borderWidth: taskDone ? 0 : 1.5,
-                  borderColor: 'rgba(255,255,255,0.2)',
-                  backgroundColor: taskDone ? Colors.accent : 'transparent',
+                  borderColor: C.border,
+                  backgroundColor: taskDone ? C.red : 'transparent',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  marginTop: 2,
+                  opacity: taskPending ? 0.6 : 1,
                 }}
               >
-                {taskDone && <Check size={12} color={Colors.textPrimary} />}
+                {taskDone && <Check size={16} color={C.text} strokeWidth={2.5} />}
               </Pressable>
               <Text
                 style={{
                   flex: 1,
-                  fontFamily: Fonts.sansRegular,
-                  fontSize: 16,
-                  lineHeight: 25,
-                  color: taskDone ? Colors.textDim : Colors.textPrimary,
+                  fontFamily: F.sans,
+                  fontSize: 15,
+                  lineHeight: 23,
+                  color: taskDone ? C.muted : C.text,
                   textDecorationLine: taskDone ? 'line-through' : 'none',
+                  paddingTop: 6,
                 }}
               >
                 {task}
               </Text>
             </View>
           ) : (
-            <Text style={{ fontFamily: Fonts.sansRegular, color: Colors.textDim, fontSize: 14 }}>
+            <Text style={{ fontFamily: F.sans, color: C.muted, fontSize: 14 }}>
               Reid will assign your task at the end of your next session.
             </Text>
           )}
         </Card>
 
         <Card title="CONTINUE">
-          <Text style={{ fontFamily: Fonts.sansRegular, color: Colors.textDim, fontSize: 14, marginBottom: 18 }}>
+          <Text
+            style={{
+              fontFamily: F.serifItalic,
+              color: C.text,
+              fontSize: 17,
+              lineHeight: 26,
+              marginBottom: 16,
+            }}
+          >
             Your co-founder is ready.
           </Text>
           <Pressable
             onPress={() => router.push('/(app)/chat')}
             style={{
-              height: 46,
-              borderRadius: 9,
-              backgroundColor: Colors.accent,
+              height: 50,
+              borderRadius: R.sm,
+              backgroundColor: C.red,
               flexDirection: 'row',
               alignItems: 'center',
               justifyContent: 'center',
@@ -258,15 +339,15 @@ export default function HomeScreen() {
           >
             <Text
               style={{
-                fontFamily: Fonts.sansMedium,
+                fontFamily: F.sansMed,
                 fontSize: 13,
-                color: Colors.textPrimary,
-                letterSpacing: 0.52,
+                color: C.text,
+                letterSpacing: 0.5,
               }}
             >
               Open session
             </Text>
-            <ArrowRight size={16} color={Colors.textPrimary} />
+            <ArrowRight size={16} color={C.text} />
           </Pressable>
         </Card>
       </View>
@@ -278,19 +359,19 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   return (
     <View
       style={{
-        backgroundColor: Colors.bgCard,
-        borderRadius: 16,
+        backgroundColor: C.surface,
+        borderRadius: R.md,
         borderWidth: 1,
-        borderColor: Colors.border,
-        padding: 22,
+        borderColor: C.border,
+        padding: 20,
       }}
     >
       <Text
         style={{
-          fontFamily: Fonts.sansMedium,
+          fontFamily: F.sansMed,
           fontSize: 11,
-          color: Colors.textDim,
-          letterSpacing: 1.4,
+          color: C.muted,
+          letterSpacing: 1.3,
           marginBottom: 14,
         }}
       >

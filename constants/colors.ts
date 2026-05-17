@@ -1,8 +1,12 @@
+// Backward-compat alias for the legacy `Colors.*` API. New code should pull
+// `C` from `constants/theme.ts` directly.
+import { C } from './theme';
+
 export const Colors = {
-  bgDark: '#0A1628',
-  bgCard: '#0F1E35',
-  textPrimary: '#F2EDE3',
-  textDim: '#7A90A8',
-  accent: '#B91C1C',
-  border: 'rgba(255,255,255,0.06)',
+  bgDark: C.bg,
+  bgCard: C.surface,
+  textPrimary: C.text,
+  textDim: C.muted,
+  accent: C.red,
+  border: C.border,
 } as const;

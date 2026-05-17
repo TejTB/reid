@@ -64,14 +64,16 @@ export default function LoginScreen() {
     if (!value) return;
     setSubmitting(true);
     setErrorMsg(null);
-    const redirectTo = Linking.createURL('/auth-callback');
+    // Must match the path Supabase allows in its "Redirect URLs" allowlist.
+    // Keep this in sync with app/auth/callback.tsx — Linking.createURL builds
+    // `reid://auth/callback` for the configured scheme.
+    const redirectTo = Linking.createURL('/auth/callback');
     const { error } = await supabase.auth.signInWithOtp({
       email: value,
       options: { emailRedirectTo: redirectTo },
     });
     setSubmitting(false);
     if (error) {
-      console.error('[login] signInWithOtp error:', error.message);
       setErrorMsg(reidErrorFor(error.message));
       return;
     }

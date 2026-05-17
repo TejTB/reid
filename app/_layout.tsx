@@ -1,37 +1,99 @@
 import { useEffect, useRef, useState } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, router, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import {
   useFonts,
   PlayfairDisplay_400Regular,
   PlayfairDisplay_400Regular_Italic,
+  PlayfairDisplay_700Bold_Italic,
 } from '@expo-google-fonts/playfair-display';
-import { Inter_400Regular, Inter_500Medium } from '@expo-google-fonts/inter';
-import { supabase } from '@/lib/supabase';
-import type { Session } from '@supabase/supabase-js';
+import {
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_700Bold,
+} from '@expo-google-fonts/inter';
 import { View, AppState, Text, Pressable } from 'react-native';
 import type { AppStateStatus } from 'react-native';
-import { Colors } from '@/constants/colors';
-import { Fonts } from '@/constants/fonts';
-import { authenticateWithBiometrics, markActive, shouldRequireBiometric } from '@/lib/biometrics';
+import * as Notifications from 'expo-notifications';
+import type { Session } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase';
+import { C, F } from '@/constants/theme';
+import {
+  authenticateWithBiometrics,
+  markActive,
+  shouldRequireBiometric,
+} from '@/lib/biometrics';
+
+void SplashScreen.preventAutoHideAsync();
+
+// Routes that must never gate-redirect to /login (the auth flow itself).
+const PUBLIC_PREFIXES = ['/login', '/auth'];
+
+function isPublicRoute(pathname: string | null | undefined): boolean {
+  if (!pathname) return false;
+  return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
 
 export default function RootLayout() {
-  const [, setSession] = useState<Session | null>(null);
+  const pathname = usePathname();
+  const [sessionReady, setSessionReady] = useState(false);
+  const sessionRef = useRef<Session | null>(null);
   const [locked, setLocked] = useState(false);
   const lastState = useRef<AppStateStatus>(AppState.currentState);
   const [fontsLoaded] = useFonts({
     PlayfairDisplay_400Regular,
     PlayfairDisplay_400Regular_Italic,
+    PlayfairDisplay_700Bold_Italic,
     Inter_400Regular,
     Inter_500Medium,
+    Inter_700Bold,
   });
 
+  // Initial session hydrate + ongoing auth state changes.
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => setSession(s));
-    return () => subscription.unsubscribe();
+    let cancelled = false;
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (cancelled) return;
+      sessionRef.current = session;
+      setSessionReady(true);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, next) => {
+      sessionRef.current = next;
+      // If the user signed out, kick them back to login.
+      if (!next && !isPublicRoute(pathname)) {
+        router.replace('/login');
+      }
+    });
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+    // pathname intentionally omitted: the subscription closes over the latest
+    // pathname via the outer scope; we only want to subscribe/unsubscribe once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Route-level auth guard: any time the route changes AND we have a known
+  // session state, kick unauthenticated users to /login (except on public
+  // routes).
+  useEffect(() => {
+    if (!sessionReady) return;
+    const session = sessionRef.current;
+    if (!session && !isPublicRoute(pathname)) {
+      router.replace('/login');
+    }
+  }, [pathname, sessionReady]);
+
+  // Hide the splash once fonts are ready and we know the auth state.
+  useEffect(() => {
+    if (fontsLoaded && sessionReady) {
+      void SplashScreen.hideAsync();
+    }
+  }, [fontsLoaded, sessionReady]);
+
+  // Foreground/background transition + biometric re-lock.
   useEffect(() => {
     const sub = AppState.addEventListener('change', async (next) => {
       const prev = lastState.current;
@@ -59,6 +121,22 @@ export default function RootLayout() {
     };
   }, []);
 
+  // Notification tap → deep-link into the requested in-app route.
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data;
+      if (data && typeof data === 'object' && 'route' in data) {
+        const route = (data as { route?: unknown }).route;
+        if (typeof route === 'string' && route.startsWith('/')) {
+          // Cast through unknown to keep typedRoutes strict at the type
+          // level while allowing dynamic notification payloads.
+          router.push(route as unknown as Parameters<typeof router.push>[0]);
+        }
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
   async function tryUnlock() {
     const ok = await authenticateWithBiometrics();
     if (ok) {
@@ -67,27 +145,35 @@ export default function RootLayout() {
     }
   }
 
-  if (!fontsLoaded) {
-    return <View style={{ flex: 1, backgroundColor: Colors.bgDark }} />;
+  if (!fontsLoaded || !sessionReady) {
+    return <View style={{ flex: 1, backgroundColor: C.bg }} />;
   }
 
   return (
-    <>
+    <SafeAreaProvider>
       <StatusBar style="light" />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: Colors.bgDark } }}>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: C.bg },
+        }}
+      >
         <Stack.Screen name="index" />
         <Stack.Screen name="login" />
-        <Stack.Screen name="auth-callback" />
+        <Stack.Screen name="auth/callback" />
         <Stack.Screen name="onboarding" />
         <Stack.Screen name="(app)" />
-        <Stack.Screen name="upgrade" />
+        <Stack.Screen name="upgrade" options={{ presentation: 'modal' }} />
       </Stack>
       {locked && (
         <View
           style={{
             position: 'absolute',
-            inset: 0,
-            backgroundColor: Colors.bgDark,
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: C.bg,
             alignItems: 'center',
             justifyContent: 'center',
             padding: 24,
@@ -96,36 +182,41 @@ export default function RootLayout() {
         >
           <View
             style={{
-              width: 48,
-              height: 48,
-              borderRadius: 24,
-              backgroundColor: Colors.accent,
+              width: 56,
+              height: 56,
+              borderRadius: 14,
+              backgroundColor: C.red,
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <Text style={{ color: Colors.textPrimary, fontFamily: Fonts.serifRegular, fontSize: 24 }}>R</Text>
+            <Text style={{ color: C.text, fontFamily: F.serifReg, fontSize: 26 }}>R</Text>
           </View>
-          <Text style={{ fontFamily: Fonts.serifItalic, color: Colors.textPrimary, fontSize: 22 }}>
-            Locked
-          </Text>
+          <Text style={{ fontFamily: F.serifItalic, color: C.text, fontSize: 22 }}>Locked</Text>
           <Pressable
             onPress={tryUnlock}
             style={{
               height: 44,
-              paddingHorizontal: 22,
+              paddingHorizontal: 24,
               borderRadius: 9,
-              backgroundColor: Colors.accent,
+              backgroundColor: C.red,
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <Text style={{ color: Colors.textPrimary, fontFamily: Fonts.sansMedium, fontSize: 13, letterSpacing: 0.52 }}>
+            <Text
+              style={{
+                color: C.text,
+                fontFamily: F.sansMed,
+                fontSize: 13,
+                letterSpacing: 0.5,
+              }}
+            >
               Unlock
             </Text>
           </Pressable>
         </View>
       )}
-    </>
+    </SafeAreaProvider>
   );
 }

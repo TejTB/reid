@@ -1,10 +1,16 @@
-import { useEffect, useState } from 'react';
-import { View, Text, ScrollView, ActivityIndicator, Pressable } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
+} from 'react-native';
 import { router } from 'expo-router';
 import { ArrowRight } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
-import { Colors } from '@/constants/colors';
-import { Fonts } from '@/constants/fonts';
+import { C, F, R, S } from '@/constants/theme';
 
 type Goal = {
   id: string;
@@ -42,71 +48,86 @@ function formatDelta(delta: number, unit: string, prefix: boolean): string {
   return `${sign}${abs} ${unit}`.trim();
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 function formatEventDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${months[d.getMonth()]} ${d.getDate()}`;
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
 
 export default function GoalsScreen() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [events, setEvents] = useState<GoalEvent[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      router.replace('/login');
+      return;
+    }
+    const [goalsRes, eventsRes] = await Promise.all([
+      supabase
+        .from('goals')
+        .select('id, title, description, target_value, current_value, unit, unit_prefix, is_primary, completed_at, created_at')
+        .order('is_primary', { ascending: false })
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('goal_events')
+        .select('id, delta, note, created_at, goals(title, unit, unit_prefix)')
+        .order('created_at', { ascending: false })
+        .limit(30),
+    ]);
+
+    setGoals((goalsRes.data ?? []) as Goal[]);
+
+    const eventRows = (eventsRes.data ?? []).map((e) => {
+      const joinedRaw = e.goals as unknown as
+        | { title: string; unit: string; unit_prefix: boolean }
+        | { title: string; unit: string; unit_prefix: boolean }[]
+        | null;
+      const joined = Array.isArray(joinedRaw) ? joinedRaw[0] ?? null : joinedRaw;
+      return {
+        id: e.id as string,
+        delta: e.delta as number,
+        note: (e.note as string | null) ?? null,
+        created_at: e.created_at as string,
+        goal_title: joined?.title ?? '',
+        goal_unit: joined?.unit ?? '',
+        goal_unit_prefix: joined?.unit_prefix ?? true,
+      };
+    });
+    setEvents(eventRows);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        if (!cancelled) router.replace('/login');
-        return;
-      }
-
-      const [goalsRes, eventsRes] = await Promise.all([
-        supabase
-          .from('goals')
-          .select('id, title, description, target_value, current_value, unit, unit_prefix, is_primary, completed_at, created_at')
-          .order('is_primary', { ascending: false })
-          .order('created_at', { ascending: true }),
-        supabase
-          .from('goal_events')
-          .select('id, delta, note, created_at, goals(title, unit, unit_prefix)')
-          .order('created_at', { ascending: false })
-          .limit(30),
-      ]);
-
-      if (cancelled) return;
-      setGoals((goalsRes.data ?? []) as Goal[]);
-
-      const eventRows = (eventsRes.data ?? []).map((e) => {
-        const joinedRaw = e.goals as unknown as
-          | { title: string; unit: string; unit_prefix: boolean }
-          | { title: string; unit: string; unit_prefix: boolean }[]
-          | null;
-        const joined = Array.isArray(joinedRaw) ? joinedRaw[0] ?? null : joinedRaw;
-        return {
-          id: e.id as string,
-          delta: e.delta as number,
-          note: (e.note as string | null) ?? null,
-          created_at: e.created_at as string,
-          goal_title: joined?.title ?? '',
-          goal_unit: joined?.unit ?? '',
-          goal_unit_prefix: joined?.unit_prefix ?? true,
-        };
-      });
-      setEvents(eventRows);
-      setLoaded(true);
+      await load();
+      if (!cancelled) setLoaded(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [load]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load]);
 
   if (!loaded) {
     return (
-      <View style={{ flex: 1, backgroundColor: Colors.bgDark, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color={Colors.accent} />
+      <View
+        style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' }}
+      >
+        <ActivityIndicator color={C.red} />
       </View>
     );
   }
@@ -114,86 +135,89 @@ export default function GoalsScreen() {
   const activeGoals = goals.filter((g) => !g.completed_at);
   const completedGoals = goals.filter((g) => g.completed_at);
   const primary = activeGoals.find((g) => g.is_primary) ?? activeGoals[0] ?? null;
-  const supporting = activeGoals.filter((g) => g.id !== primary?.id);
 
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: Colors.bgDark }}
-      contentContainerStyle={{ paddingHorizontal: 22, paddingTop: 56, paddingBottom: 40 }}
+      style={{ flex: 1, backgroundColor: C.bg }}
+      contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 56, paddingBottom: 32 }}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.red} />
+      }
     >
       <Text
         style={{
-          fontFamily: Fonts.serifRegular,
-          color: Colors.textPrimary,
-          fontSize: 36,
-          letterSpacing: -0.95,
-          lineHeight: 40,
+          fontFamily: F.serifReg,
+          color: C.text,
+          fontSize: 28,
+          letterSpacing: -0.6,
+          lineHeight: 34,
         }}
       >
         Your Goals
       </Text>
-      <Text style={{ fontFamily: Fonts.sansRegular, color: Colors.textDim, fontSize: 15, marginTop: 8 }}>
+      <Text style={{ fontFamily: F.sans, color: C.muted, fontSize: 14, marginTop: 6 }}>
         The numbers Reid is helping you move.
       </Text>
 
-      {activeGoals.length === 0 && completedGoals.length === 0 ? (
+      {goals.length === 0 ? (
         <View
           style={{
             marginTop: 32,
-            backgroundColor: Colors.bgCard,
-            borderRadius: 16,
+            backgroundColor: C.surface,
+            borderRadius: R.md,
             borderWidth: 1,
-            borderColor: Colors.border,
-            padding: 22,
+            borderColor: C.border,
+            padding: 20,
           }}
         >
           <Text
             style={{
-              fontFamily: Fonts.serifItalic,
-              color: '#C8D5E3',
-              fontSize: 19,
-              lineHeight: 29,
+              fontFamily: F.serifItalic,
+              color: C.text,
+              fontSize: 17,
+              lineHeight: 26,
             }}
           >
-            No goals yet. Open a session and tell Reid the number you{"’"}re trying to move — he{"’"}ll keep score from there.
+            No goals yet. Open a session and tell Reid the number you{"'"}re trying to move.
           </Text>
           <Pressable
             onPress={() => router.push('/(app)/chat')}
             style={{
               marginTop: 18,
-              height: 46,
-              borderRadius: 9,
-              backgroundColor: Colors.accent,
+              height: 50,
+              borderRadius: R.sm,
+              backgroundColor: C.red,
               flexDirection: 'row',
               alignItems: 'center',
               justifyContent: 'center',
               gap: 8,
             }}
           >
-            <Text style={{ fontFamily: Fonts.sansMedium, fontSize: 13, color: Colors.textPrimary, letterSpacing: 0.52 }}>
-              Open session with Reid
+            <Text
+              style={{
+                fontFamily: F.sansMed,
+                fontSize: 13,
+                color: C.text,
+                letterSpacing: 0.5,
+              }}
+            >
+              Open session
             </Text>
-            <ArrowRight size={16} color={Colors.textPrimary} />
+            <ArrowRight size={16} color={C.text} />
           </Pressable>
         </View>
       ) : (
-        <View style={{ marginTop: 28, gap: 16 }}>
+        <View style={{ marginTop: S.lg, gap: S.md }}>
           {primary && <PrimaryHero goal={primary} />}
-          {supporting.length > 0 && (
-            <View style={{ gap: 12 }}>
-              {supporting.map((g) => (
-                <GoalCard key={g.id} goal={g} />
-              ))}
-            </View>
-          )}
+
           {completedGoals.length > 0 && (
             <View style={{ marginTop: 8 }}>
               <Text
                 style={{
-                  fontFamily: Fonts.sansMedium,
+                  fontFamily: F.sansMed,
                   fontSize: 11,
-                  color: Colors.textDim,
-                  letterSpacing: 1.4,
+                  color: C.muted,
+                  letterSpacing: 1.3,
                   marginBottom: 12,
                 }}
               >
@@ -207,68 +231,94 @@ export default function GoalsScreen() {
             </View>
           )}
 
-          {events.length > 0 && (
-            <View style={{ marginTop: 24 }}>
-              <Text
+          <View style={{ marginTop: 4 }}>
+            <Text
+              style={{
+                fontFamily: F.sansMed,
+                fontSize: 11,
+                color: C.muted,
+                letterSpacing: 1.3,
+                marginBottom: 12,
+              }}
+            >
+              LIVE ACTIVITY
+            </Text>
+            {events.length === 0 ? (
+              <View
                 style={{
-                  fontFamily: Fonts.sansMedium,
-                  fontSize: 11,
-                  color: Colors.textDim,
-                  letterSpacing: 1.4,
-                  marginBottom: 12,
+                  backgroundColor: C.surface,
+                  borderRadius: R.md,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                  padding: 20,
                 }}
               >
-                RECENT
-              </Text>
+                <Text
+                  style={{
+                    fontFamily: F.serifItalic,
+                    color: C.muted,
+                    fontSize: 15,
+                    lineHeight: 23,
+                  }}
+                >
+                  Updates will appear here as you tell Reid about your progress.
+                </Text>
+              </View>
+            ) : (
               <View style={{ gap: 8 }}>
                 {events.map((e) => (
                   <View
                     key={e.id}
                     style={{
                       flexDirection: 'row',
-                      paddingVertical: 10,
+                      paddingVertical: 12,
                       paddingHorizontal: 14,
-                      backgroundColor: Colors.bgCard,
-                      borderRadius: 10,
+                      backgroundColor: C.surface,
+                      borderRadius: R.sm,
                       borderWidth: 1,
-                      borderColor: Colors.border,
+                      borderColor: C.border,
                       gap: 12,
                     }}
                   >
                     <Text
                       style={{
-                        fontFamily: Fonts.sansMedium,
+                        fontFamily: F.sansMed,
                         fontSize: 13,
-                        color: e.delta >= 0 ? Colors.accent : Colors.textDim,
-                        minWidth: 60,
+                        color: e.delta >= 0 ? C.red : C.muted,
+                        minWidth: 56,
                       }}
                     >
                       {formatDelta(e.delta, e.goal_unit, e.goal_unit_prefix)}
                     </Text>
                     <View style={{ flex: 1 }}>
                       <Text
-                        style={{ fontFamily: Fonts.sansRegular, fontSize: 13, color: Colors.textPrimary }}
+                        style={{ fontFamily: F.sans, fontSize: 13, color: C.text }}
                         numberOfLines={1}
                       >
                         {e.goal_title}
                       </Text>
                       {e.note && (
                         <Text
-                          style={{ fontFamily: Fonts.sansRegular, fontSize: 12, color: Colors.textDim, marginTop: 2 }}
+                          style={{
+                            fontFamily: F.sans,
+                            fontSize: 12,
+                            color: C.muted,
+                            marginTop: 2,
+                          }}
                           numberOfLines={2}
                         >
                           {e.note}
                         </Text>
                       )}
                     </View>
-                    <Text style={{ fontFamily: Fonts.sansRegular, fontSize: 11, color: '#3A5070' }}>
+                    <Text style={{ fontFamily: F.sans, fontSize: 11, color: C.muted }}>
                       {formatEventDate(e.created_at)}
                     </Text>
                   </View>
                 ))}
               </View>
-            </View>
-          )}
+            )}
+          </View>
         </View>
       )}
     </ScrollView>
@@ -276,23 +326,25 @@ export default function GoalsScreen() {
 }
 
 function PrimaryHero({ goal }: { goal: Goal }) {
-  const pct = goal.target_value > 0 ? Math.min(100, (goal.current_value / goal.target_value) * 100) : 0;
+  const pct =
+    goal.target_value > 0 ? Math.min(100, (goal.current_value / goal.target_value) * 100) : 0;
+  const remaining = Math.max(0, goal.target_value - goal.current_value);
   return (
     <View
       style={{
-        backgroundColor: Colors.bgCard,
-        borderRadius: 16,
+        backgroundColor: C.surface,
+        borderRadius: R.md,
         borderWidth: 1,
-        borderColor: Colors.border,
-        padding: 22,
+        borderColor: C.border,
+        padding: 20,
       }}
     >
       <Text
         style={{
-          fontFamily: Fonts.sansMedium,
+          fontFamily: F.sansMed,
           fontSize: 11,
-          color: Colors.textDim,
-          letterSpacing: 1.4,
+          color: C.muted,
+          letterSpacing: 1.3,
           marginBottom: 14,
         }}
       >
@@ -300,9 +352,9 @@ function PrimaryHero({ goal }: { goal: Goal }) {
       </Text>
       <Text
         style={{
-          fontFamily: Fonts.serifRegular,
+          fontFamily: F.serifReg,
           fontSize: 22,
-          color: Colors.textPrimary,
+          color: C.text,
           letterSpacing: -0.4,
           lineHeight: 28,
         }}
@@ -310,69 +362,65 @@ function PrimaryHero({ goal }: { goal: Goal }) {
         {goal.title}
       </Text>
       {goal.description && (
-        <Text style={{ fontFamily: Fonts.sansRegular, fontSize: 13, color: Colors.textDim, marginTop: 6 }}>
+        <Text style={{ fontFamily: F.sans, fontSize: 13, color: C.muted, marginTop: 6 }}>
           {goal.description}
         </Text>
       )}
-      <View style={{ marginTop: 20 }}>
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'flex-end',
-            justifyContent: 'space-between',
-            marginBottom: 10,
-          }}
-        >
-          <Text style={{ fontFamily: Fonts.serifRegular, fontSize: 32, color: Colors.textPrimary }}>
-            {formatGoalValue(goal.current_value, goal.unit, goal.unit_prefix)}
-          </Text>
-          <Text style={{ fontFamily: Fonts.sansRegular, fontSize: 13, color: Colors.textDim }}>
-            of {formatGoalValue(goal.target_value, goal.unit, goal.unit_prefix)}
-          </Text>
-        </View>
-        <View
-          style={{
-            height: 4,
-            backgroundColor: 'rgba(255,255,255,0.05)',
-            borderRadius: 2,
-            overflow: 'hidden',
-          }}
-        >
-          <View style={{ width: `${pct}%`, height: '100%', backgroundColor: Colors.accent }} />
-        </View>
+      <View style={{ marginTop: 22 }}>
+        <Text style={{ fontFamily: F.serifReg, fontSize: 40, color: C.text, letterSpacing: -1 }}>
+          {formatGoalValue(goal.current_value, goal.unit, goal.unit_prefix)}
+        </Text>
+        <Text style={{ fontFamily: F.sans, fontSize: 13, color: C.muted, marginTop: 2 }}>
+          of {formatGoalValue(goal.target_value, goal.unit, goal.unit_prefix)}
+        </Text>
       </View>
+      <View
+        style={{
+          marginTop: 16,
+          height: 4,
+          backgroundColor: 'rgba(255,255,255,0.05)',
+          borderRadius: 2,
+          overflow: 'hidden',
+        }}
+      >
+        <View style={{ width: `${pct}%`, height: '100%', backgroundColor: C.red }} />
+      </View>
+      <Text style={{ marginTop: 10, fontFamily: F.sans, fontSize: 12, color: C.muted }}>
+        {formatGoalValue(remaining, goal.unit, goal.unit_prefix)} to go · {Math.round(pct)}% there
+      </Text>
     </View>
   );
 }
 
 function GoalCard({ goal, dim = false }: { goal: Goal; dim?: boolean }) {
-  const pct = goal.target_value > 0 ? Math.min(100, (goal.current_value / goal.target_value) * 100) : 0;
+  const pct =
+    goal.target_value > 0 ? Math.min(100, (goal.current_value / goal.target_value) * 100) : 0;
   return (
     <View
       style={{
-        backgroundColor: Colors.bgCard,
-        borderRadius: 14,
+        backgroundColor: C.surface,
+        borderRadius: R.md,
         borderWidth: 1,
-        borderColor: Colors.border,
+        borderColor: C.border,
         padding: 18,
         opacity: dim ? 0.6 : 1,
       }}
     >
       <Text
         style={{
-          fontFamily: Fonts.serifRegular,
+          fontFamily: F.serifReg,
           fontSize: 17,
-          color: Colors.textPrimary,
+          color: C.text,
           letterSpacing: -0.2,
         }}
       >
         {goal.title}
       </Text>
       <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: 10, gap: 8 }}>
-        <Text style={{ fontFamily: Fonts.serifRegular, fontSize: 22, color: Colors.textPrimary }}>
+        <Text style={{ fontFamily: F.serifReg, fontSize: 22, color: C.text }}>
           {formatGoalValue(goal.current_value, goal.unit, goal.unit_prefix)}
         </Text>
-        <Text style={{ fontFamily: Fonts.sansRegular, fontSize: 12, color: Colors.textDim }}>
+        <Text style={{ fontFamily: F.sans, fontSize: 12, color: C.muted }}>
           of {formatGoalValue(goal.target_value, goal.unit, goal.unit_prefix)}
         </Text>
       </View>
@@ -385,7 +433,13 @@ function GoalCard({ goal, dim = false }: { goal: Goal; dim?: boolean }) {
           overflow: 'hidden',
         }}
       >
-        <View style={{ width: `${pct}%`, height: '100%', backgroundColor: dim ? Colors.textDim : Colors.accent }} />
+        <View
+          style={{
+            width: `${pct}%`,
+            height: '100%',
+            backgroundColor: dim ? C.muted : C.red,
+          }}
+        />
       </View>
     </View>
   );

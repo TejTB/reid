@@ -1,6 +1,10 @@
+// Backward-compat alias for the legacy `Fonts.*` API. New code should pull
+// `F` from `constants/theme.ts` directly.
+import { F } from './theme';
+
 export const Fonts = {
-  serifRegular: 'PlayfairDisplay_400Regular',
-  serifItalic: 'PlayfairDisplay_400Regular_Italic',
-  sansRegular: 'Inter_400Regular',
-  sansMedium: 'Inter_500Medium',
+  serifRegular: F.serifReg,
+  serifItalic: F.serifItalic,
+  sansRegular: F.sans,
+  sansMedium: F.sansMed,
 } as const;

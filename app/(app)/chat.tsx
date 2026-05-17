@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,24 +7,37 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  Animated,
-  Easing,
   Alert,
 } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withRepeat,
+  withSequence,
+  withDelay,
+  Easing,
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Volume2 } from 'lucide-react-native';
+import { ArrowUp } from 'lucide-react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { reidFetch } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
-import { Colors } from '@/constants/colors';
-import { Fonts } from '@/constants/fonts';
+import { C, F, R, S } from '@/constants/theme';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
-const CHAT_SESSION_KEY = 'reid:chatSessionId';
+const VOICE_PREF_KEY = 'reid_voice_enabled';
+const LAST_SEEN_KEY = 'reid:lastSeenReidMessageAt';
+
 let cachedSessionId: string | null = null;
 
+// Base64-encode the audio ArrayBuffer for FileSystem.writeAsStringAsync. We
+// avoid `Buffer.from(...).toString("base64")` because the Hermes runtime
+// doesn't ship Buffer by default; instead we chunk-encode via btoa.
 function bytesToBase64(bytes: Uint8Array): string {
   const chunkSize = 0x8000;
   let binary = '';
@@ -33,34 +46,161 @@ function bytesToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode.apply(null, Array.from(chunk));
   }
   if (typeof globalThis.btoa === 'function') return globalThis.btoa(binary);
-  const Buf = (globalThis as { Buffer?: { from(input: string, enc?: string): { toString(enc: string): string } } }).Buffer;
-  if (Buf) return Buf.from(binary, 'binary').toString('base64');
   return '';
 }
 
+function formatLastSession(iso: string | null, now: Date = new Date()): string {
+  if (!iso) return 'First session.';
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return 'First session.';
+  const sameDay =
+    then.getFullYear() === now.getFullYear() &&
+    then.getMonth() === now.getMonth() &&
+    then.getDate() === now.getDate();
+  const hh = then.getHours();
+  const mm = then.getMinutes().toString().padStart(2, '0');
+  const ampm = hh >= 12 ? 'pm' : 'am';
+  const h12 = ((hh + 11) % 12) + 1;
+  const time = `${h12}:${mm}${ampm}`;
+  if (sameDay) return `Last session: Today ${time}`;
+  const y = new Date(now);
+  y.setDate(now.getDate() - 1);
+  const isYesterday =
+    then.getFullYear() === y.getFullYear() &&
+    then.getMonth() === y.getMonth() &&
+    then.getDate() === y.getDate();
+  if (isYesterday) return `Last session: Yesterday ${time}`;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `Last session: ${months[then.getMonth()]} ${then.getDate()} ${time}`;
+}
+
+// One assistant turn that fades + translates upward on first render.
+function ReidBubble({ text }: { text: string }) {
+  const opacity = useSharedValue(0);
+  const ty = useSharedValue(8);
+
+  useEffect(() => {
+    opacity.value = withTiming(1, { duration: 300, easing: Easing.out(Easing.quad) });
+    ty.value = withTiming(0, { duration: 300, easing: Easing.out(Easing.quad) });
+  }, [opacity, ty]);
+
+  const style = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: ty.value }],
+  }));
+
+  return (
+    <Animated.View style={[{ marginTop: S.sm, marginBottom: S.md, paddingRight: 24 }, style]}>
+      <Text
+        style={{
+          fontFamily: F.serifItalic,
+          fontSize: 20,
+          lineHeight: 28,
+          color: C.text,
+        }}
+      >
+        {text}
+      </Text>
+    </Animated.View>
+  );
+}
+
+function TypingDots() {
+  const d1 = useSharedValue(0.4);
+  const d2 = useSharedValue(0.4);
+  const d3 = useSharedValue(0.4);
+
+  useEffect(() => {
+    const cfg = { duration: 400, easing: Easing.inOut(Easing.ease) };
+    d1.value = withRepeat(withSequence(withTiming(1, cfg), withTiming(0.4, cfg)), -1, false);
+    d2.value = withDelay(150, withRepeat(withSequence(withTiming(1, cfg), withTiming(0.4, cfg)), -1, false));
+    d3.value = withDelay(300, withRepeat(withSequence(withTiming(1, cfg), withTiming(0.4, cfg)), -1, false));
+  }, [d1, d2, d3]);
+
+  const s1 = useAnimatedStyle(() => ({ opacity: d1.value }));
+  const s2 = useAnimatedStyle(() => ({ opacity: d2.value }));
+  const s3 = useAnimatedStyle(() => ({ opacity: d3.value }));
+  const baseDot = {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: C.muted,
+    marginRight: 8,
+  } as const;
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: S.sm,
+        marginBottom: S.md,
+        paddingRight: 24,
+      }}
+    >
+      <Animated.View style={[baseDot, s1]} />
+      <Animated.View style={[baseDot, s2]} />
+      <Animated.View style={[baseDot, s3]} />
+    </View>
+  );
+}
+
+function Waveform() {
+  const v1 = useSharedValue(0.3);
+  const v2 = useSharedValue(0.3);
+  const v3 = useSharedValue(0.3);
+
+  useEffect(() => {
+    const cfg = { duration: 280, easing: Easing.inOut(Easing.ease) };
+    v1.value = withRepeat(withSequence(withTiming(1, cfg), withTiming(0.3, cfg)), -1, false);
+    v2.value = withDelay(90, withRepeat(withSequence(withTiming(1, cfg), withTiming(0.3, cfg)), -1, false));
+    v3.value = withDelay(180, withRepeat(withSequence(withTiming(1, cfg), withTiming(0.3, cfg)), -1, false));
+  }, [v1, v2, v3]);
+
+  const s1 = useAnimatedStyle(() => ({ transform: [{ scaleY: v1.value }] }));
+  const s2 = useAnimatedStyle(() => ({ transform: [{ scaleY: v2.value }] }));
+  const s3 = useAnimatedStyle(() => ({ transform: [{ scaleY: v3.value }] }));
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, height: 12 }}>
+      <Animated.View
+        style={[{ width: 2, height: 12, backgroundColor: C.text, borderRadius: 1 }, s1]}
+      />
+      <Animated.View
+        style={[{ width: 2, height: 12, backgroundColor: C.text, borderRadius: 1 }, s2]}
+      />
+      <Animated.View
+        style={[{ width: 2, height: 12, backgroundColor: C.text, borderRadius: 1 }, s3]}
+      />
+    </View>
+  );
+}
+
 export default function ChatScreen() {
+  const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [input, setInput] = useState('');
-  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [waveformActive, setWaveformActive] = useState(false);
   const [isPro, setIsPro] = useState(false);
   const [lastSessionAt, setLastSessionAt] = useState<string | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
   const sessionIdRef = useRef<string | null>(cachedSessionId);
-  const bar1 = useRef(new Animated.Value(0.3)).current;
-  const bar2 = useRef(new Animated.Value(0.3)).current;
-  const bar3 = useRef(new Animated.Value(0.3)).current;
-  const bar4 = useRef(new Animated.Value(0.3)).current;
-  const bar5 = useRef(new Animated.Value(0.3)).current;
+  const lastPlayedRef = useRef<string | null>(null);
+  const flatListRef = useRef<FlatList<Msg> | null>(null);
 
+  // Initial data load: subscription_status + last_session_at.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const [{ data: { session } }, prefRaw] = await Promise.all([
+        supabase.auth.getSession(),
+        AsyncStorage.getItem(VOICE_PREF_KEY),
+      ]);
+      if (cancelled) return;
       if (!session) {
-        if (!cancelled) router.replace('/login');
+        router.replace('/login');
         return;
       }
       const { data: row } = await supabase
@@ -71,12 +211,22 @@ export default function ChatScreen() {
       if (cancelled) return;
       setIsPro(row?.subscription_status === 'pro');
       setLastSessionAt((row?.last_session_at as string | null) ?? null);
+      // Voice defaults ON for Pro; off otherwise (free users get a preview
+      // when they tap "Hear Reid", not auto-play).
+      if (prefRaw === 'false') {
+        setVoiceEnabled(false);
+      } else {
+        setVoiceEnabled(true);
+      }
+      // Mark Reid messages seen, clearing the tab badge.
+      void AsyncStorage.setItem(LAST_SEEN_KEY, new Date().toISOString());
     })();
     return () => {
       cancelled = true;
     };
   }, []);
 
+  // Tear down any playing audio when the screen unmounts.
   useEffect(() => {
     return () => {
       const s = soundRef.current;
@@ -86,91 +236,85 @@ export default function ChatScreen() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!waveformActive) {
-      [bar1, bar2, bar3, bar4, bar5].forEach((b) => b.setValue(0.3));
-      return;
-    }
-    const loops = [bar1, bar2, bar3, bar4, bar5].map((b, i) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(b, { toValue: 1, duration: 400, delay: i * 80, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
-          Animated.timing(b, { toValue: 0.3, duration: 400, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
-        ]),
-      ),
-    );
-    loops.forEach((l) => l.start());
-    return () => {
-      loops.forEach((l) => l.stop());
-    };
-  }, [waveformActive, bar1, bar2, bar3, bar4, bar5]);
-
-  async function playMessage(text: string) {
-    if (soundRef.current) {
-      try {
-        await soundRef.current.unloadAsync();
-      } catch {
-      }
-      soundRef.current = null;
-    }
-    setWaveformActive(true);
-    try {
-      const res = await reidFetch('/api/voice', {
-        method: 'POST',
-        body: JSON.stringify({ text }),
-      });
-      if (res.status === 403) {
-        setVoiceEnabled(false);
-        setWaveformActive(false);
-        return;
-      }
-      if (!res.ok) {
-        setWaveformActive(false);
-        return;
-      }
-      const buf = await res.arrayBuffer();
-      const bytes = new Uint8Array(buf);
-      const base64 = bytesToBase64(bytes);
-      const dir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
-      if (!dir) {
-        setWaveformActive(false);
-        return;
-      }
-      const uri = `${dir}reid-voice-${Date.now()}.mp3`;
-      await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
-      const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true });
-      soundRef.current = sound;
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (!status.isLoaded) return;
-        if (status.didJustFinish) {
-          setWaveformActive(false);
-          void sound.unloadAsync();
-          soundRef.current = null;
+  const playMessage = useCallback(
+    async (text: string, preview: boolean) => {
+      if (soundRef.current) {
+        try {
+          await soundRef.current.unloadAsync();
+        } catch {
+          // Sound may already be unloaded.
         }
-      });
-    } catch {
-      setWaveformActive(false);
-    }
-  }
+        soundRef.current = null;
+      }
+      setWaveformActive(true);
+      try {
+        const res = await reidFetch('/api/tts', {
+          method: 'POST',
+          body: JSON.stringify({ text, preview }),
+        });
+        if (res.status === 403) {
+          setWaveformActive(false);
+          // Free user requested full playback — upsell.
+          router.push('/upgrade');
+          return;
+        }
+        if (!res.ok) {
+          setWaveformActive(false);
+          return;
+        }
+        const buf = await res.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        const base64 = bytesToBase64(bytes);
+        const dir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+        if (!dir) {
+          setWaveformActive(false);
+          return;
+        }
+        const uri = `${dir}reid-voice-${Date.now()}.mp3`;
+        await FileSystem.writeAsStringAsync(uri, base64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true });
+        soundRef.current = sound;
+        sound.setOnPlaybackStatusUpdate((status) => {
+          if (!status.isLoaded) return;
+          if (status.didJustFinish) {
+            setWaveformActive(false);
+            void sound.unloadAsync();
+            soundRef.current = null;
+            // Free users hear the preview, then see the upgrade modal.
+            if (preview) {
+              router.push('/upgrade');
+            }
+          }
+        });
+      } catch {
+        setWaveformActive(false);
+      }
+    },
+    [],
+  );
 
+  // Pro + voice toggle ON: auto-play each new Reid message exactly once.
   useEffect(() => {
-    if (!voiceEnabled || isStreaming || messages.length === 0) return;
+    if (!isPro || !voiceEnabled || isStreaming || messages.length === 0) return;
     const last = messages[messages.length - 1];
     if (last.role !== 'assistant') return;
-    void playMessage(last.content);
-  }, [messages, isStreaming, voiceEnabled]);
+    if (lastPlayedRef.current === last.content) return;
+    lastPlayedRef.current = last.content;
+    void playMessage(last.content, false);
+  }, [messages, isStreaming, voiceEnabled, isPro, playMessage]);
 
   async function runReid(seed: Msg[]) {
     setIsStreaming(true);
     setStreamingText('');
     let acc = '';
-    let resolvedSessionId: string | null = sessionIdRef.current;
     try {
       const res = await reidFetch('/api/reid', {
         method: 'POST',
         body: JSON.stringify({
           mode: 'chat',
-          sessionId: resolvedSessionId,
+          sessionId: sessionIdRef.current,
           messages: seed,
         }),
       });
@@ -188,7 +332,6 @@ export default function ChatScreen() {
       }
       const sid = res.headers.get('X-Reid-Session-Id') ?? res.headers.get('x-reid-session-id');
       if (sid) {
-        resolvedSessionId = sid;
         sessionIdRef.current = sid;
         cachedSessionId = sid;
       }
@@ -231,147 +374,161 @@ export default function ChatScreen() {
     await runReid(next);
   }
 
-  function onVoiceToggle() {
-    if (!isPro) {
-      Alert.alert('Reid Pro required', 'Hear Reid speak responses aloud with Pro.', [
-        { text: 'Not now', style: 'cancel' },
-        { text: 'Upgrade', onPress: () => router.push('/upgrade') },
-      ]);
-      return;
-    }
-    setVoiceEnabled((v) => !v);
+  async function onHearReid() {
+    const last = [...messages].reverse().find((m) => m.role === 'assistant');
+    if (!last) return;
+    await playMessage(last.content, !isPro);
   }
 
-  void CHAT_SESSION_KEY;
+  // Auto-scroll to bottom when a new message lands.
+  useEffect(() => {
+    if (!flatListRef.current) return;
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    });
+  }, [messages, streamingText]);
 
   const visible: Msg[] = [...messages];
   if (streamingText && isStreaming) {
     visible.push({ role: 'assistant', content: streamingText });
   }
+  // FlatList inverted: newest first.
   const inverted = [...visible].reverse();
 
-  const subtitle = lastSessionAt ? 'Continuing the conversation.' : 'First session.';
+  const lastReid = [...messages].reverse().find((m) => m.role === 'assistant');
+  const subtitle = formatLastSession(lastSessionAt);
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={{ flex: 1, backgroundColor: Colors.bgDark }}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+      style={{ flex: 1, backgroundColor: C.bg }}
     >
       <View
         style={{
-          paddingTop: 18,
-          paddingHorizontal: 22,
+          paddingTop: insets.top + 12,
+          paddingHorizontal: 20,
           paddingBottom: 14,
           flexDirection: 'row',
           alignItems: 'center',
-          gap: 12,
           borderBottomWidth: 1,
-          borderBottomColor: Colors.border,
+          borderBottomColor: C.border,
         }}
       >
-        <Text style={{ fontFamily: Fonts.serifItalic, fontSize: 19, color: Colors.textPrimary }}>Reid</Text>
-        <Text style={{ fontFamily: Fonts.sansRegular, fontSize: 12, color: Colors.textDim }}>{subtitle}</Text>
-        <View style={{ flex: 1 }} />
-        {waveformActive && (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, height: 16, marginRight: 8 }}>
-            {[bar1, bar2, bar3, bar4, bar5].map((b, i) => (
-              <Animated.View
-                key={i}
-                style={{
-                  width: 2,
-                  height: 16,
-                  backgroundColor: Colors.accent,
-                  borderRadius: 1,
-                  transform: [{ scaleY: b }],
-                }}
-              />
-            ))}
-          </View>
-        )}
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontFamily: F.serifReg, fontSize: 18, color: C.text }}>Reid</Text>
+          <Text style={{ fontFamily: F.sans, fontSize: 12, color: C.muted, marginTop: 2 }}>
+            {subtitle}
+          </Text>
+        </View>
         <Pressable
-          onPress={onVoiceToggle}
+          onPress={onHearReid}
+          disabled={!lastReid || waveformActive}
           style={{
-            padding: 6,
-            borderRadius: 6,
-            backgroundColor: voiceEnabled ? 'rgba(185,28,28,0.1)' : 'transparent',
+            paddingVertical: 6,
+            paddingHorizontal: 14,
+            borderRadius: R.pill,
+            backgroundColor: C.red,
+            opacity: !lastReid ? 0.5 : 1,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
           }}
         >
-          <Volume2 size={16} color={voiceEnabled ? Colors.accent : Colors.textDim} />
+          {waveformActive ? (
+            <Waveform />
+          ) : (
+            <Text
+              style={{
+                fontFamily: F.sansMed,
+                fontSize: 13,
+                color: C.text,
+                letterSpacing: 0.3,
+              }}
+            >
+              Hear Reid
+            </Text>
+          )}
         </Pressable>
       </View>
 
       {visible.length === 0 ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}>
+        <View
+          style={{
+            flex: 1,
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingHorizontal: 24,
+          }}
+        >
           <View
             style={{
-              width: 48,
-              height: 48,
-              borderRadius: 24,
-              backgroundColor: Colors.accent,
+              width: 80,
+              height: 80,
+              borderRadius: 16,
+              backgroundColor: C.red,
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <Text style={{ color: Colors.textPrimary, fontFamily: Fonts.serifRegular, fontSize: 24 }}>R</Text>
+            <Text style={{ color: C.text, fontFamily: F.serifReg, fontSize: 40 }}>R</Text>
           </View>
           <Text
             style={{
-              fontFamily: Fonts.serifItalic,
-              fontSize: 26,
-              color: Colors.textPrimary,
-              marginTop: 22,
+              fontFamily: F.serifItalic,
+              fontSize: 20,
+              color: C.text,
+              marginTop: 24,
               textAlign: 'center',
-              lineHeight: 32,
+              lineHeight: 28,
             }}
           >
             Your co-founder is ready.
           </Text>
-          <Text style={{ fontFamily: Fonts.sansRegular, fontSize: 13, color: Colors.textDim, marginTop: 10 }}>
+          <Text
+            style={{
+              fontFamily: F.sans,
+              fontSize: 14,
+              color: C.muted,
+              marginTop: 8,
+            }}
+          >
             Start talking.
           </Text>
         </View>
       ) : (
         <FlatList
+          ref={flatListRef}
           data={inverted}
           inverted
-          keyExtractor={(_, i) => `m-${i}`}
-          contentContainerStyle={{ paddingHorizontal: 22, paddingVertical: 18 }}
+          keyExtractor={(_, i) => `m-${visible.length - 1 - i}`}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 18 }}
           renderItem={({ item }) => {
             if (item.role === 'assistant') {
-              return (
-                <View style={{ marginBottom: 18, maxWidth: '92%' }}>
-                  <Text
-                    style={{
-                      fontFamily: Fonts.serifItalic,
-                      fontSize: 19,
-                      lineHeight: 32,
-                      color: Colors.textPrimary,
-                    }}
-                  >
-                    {item.content}
-                  </Text>
-                </View>
-              );
+              return <ReidBubble text={item.content} />;
             }
             return (
-              <View style={{ marginBottom: 18, alignItems: 'flex-end' }}>
+              <View style={{ marginTop: S.sm, marginBottom: S.md, alignItems: 'flex-end' }}>
                 <View
                   style={{
-                    maxWidth: '78%',
-                    backgroundColor: 'rgba(255,255,255,0.04)',
-                    borderRadius: 18,
-                    paddingHorizontal: 14,
-                    paddingVertical: 10,
+                    maxWidth: '75%',
+                    backgroundColor: 'rgba(255,255,255,0.08)',
                     borderWidth: 1,
-                    borderColor: Colors.border,
+                    borderColor: 'rgba(255,255,255,0.10)',
+                    borderTopLeftRadius: 16,
+                    borderTopRightRadius: 16,
+                    borderBottomLeftRadius: 16,
+                    borderBottomRightRadius: 4,
+                    paddingHorizontal: 16,
+                    paddingVertical: 12,
                   }}
                 >
                   <Text
                     style={{
-                      fontFamily: Fonts.sansRegular,
+                      fontFamily: F.sans,
                       fontSize: 15,
                       lineHeight: 22,
-                      color: '#C8D5E3',
+                      color: C.text,
                     }}
                   >
                     {item.content}
@@ -380,58 +537,62 @@ export default function ChatScreen() {
               </View>
             );
           }}
+          ListHeaderComponent={isStreaming && !streamingText ? <TypingDots /> : null}
         />
       )}
 
       <View
         style={{
-          paddingHorizontal: 18,
-          paddingTop: 10,
-          paddingBottom: Platform.OS === 'ios' ? 18 : 12,
+          paddingHorizontal: 16,
+          paddingTop: 12,
+          paddingBottom: 12 + insets.bottom,
           borderTopWidth: 1,
-          borderTopColor: Colors.border,
+          borderTopColor: C.border,
+          backgroundColor: C.surface,
           flexDirection: 'row',
+          alignItems: 'flex-end',
           gap: 10,
         }}
       >
         <TextInput
           value={input}
           onChangeText={setInput}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           editable={!isStreaming}
-          placeholder="What's on your mind?"
-          placeholderTextColor={Colors.textDim}
+          placeholder="Say something..."
+          placeholderTextColor={C.muted}
           multiline
           style={{
             flex: 1,
-            color: Colors.textPrimary,
-            fontFamily: Fonts.sansRegular,
+            color: C.text,
+            fontFamily: F.sans,
             fontSize: 15,
-            minHeight: 42,
-            maxHeight: 120,
+            minHeight: 44,
+            maxHeight: 130,
             paddingHorizontal: 14,
             paddingVertical: 10,
-            borderRadius: 12,
+            borderRadius: R.md,
             borderWidth: 1,
-            borderColor: 'rgba(122,144,168,0.25)',
-            backgroundColor: 'transparent',
+            // ONE clean focus transition: idle border → red focus border.
+            borderColor: focused ? C.redFocus : C.border,
+            backgroundColor: C.bg,
           }}
         />
         <Pressable
           onPress={handleSend}
           disabled={isStreaming || !input.trim()}
           style={{
-            height: 42,
-            paddingHorizontal: 16,
-            borderRadius: 9,
-            backgroundColor: Colors.accent,
+            width: 36,
+            height: 36,
+            borderRadius: 18,
+            backgroundColor: C.red,
             alignItems: 'center',
             justifyContent: 'center',
-            opacity: isStreaming || !input.trim() ? 0.5 : 1,
+            opacity: isStreaming || !input.trim() ? 0.4 : 1,
           }}
         >
-          <Text style={{ color: Colors.textPrimary, fontFamily: Fonts.sansMedium, fontSize: 13, letterSpacing: 0.5 }}>
-            Send
-          </Text>
+          <ArrowUp size={18} color={C.text} strokeWidth={2.4} />
         </Pressable>
       </View>
     </KeyboardAvoidingView>
