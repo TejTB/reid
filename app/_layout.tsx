@@ -20,6 +20,7 @@ import * as Notifications from 'expo-notifications';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { C, F } from '@/constants/theme';
+import LogoMark from '@/components/LogoMark';
 import {
   authenticateWithBiometrics,
   markActive,
@@ -180,18 +181,7 @@ export default function RootLayout() {
             gap: 22,
           }}
         >
-          <View
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: 14,
-              backgroundColor: C.red,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Text style={{ color: C.text, fontFamily: F.serifReg, fontSize: 26 }}>R</Text>
-          </View>
+          <LogoMark size={56} />
           <Text style={{ fontFamily: F.serifItalic, color: C.text, fontSize: 22 }}>Locked</Text>
           <Pressable
             onPress={tryUnlock}

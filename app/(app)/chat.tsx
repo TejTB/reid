@@ -27,6 +27,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { reidFetch } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { C, F, R, S } from '@/constants/theme';
+import LogoMark from '@/components/LogoMark';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
@@ -461,18 +462,7 @@ export default function ChatScreen() {
             paddingHorizontal: 24,
           }}
         >
-          <View
-            style={{
-              width: 80,
-              height: 80,
-              borderRadius: 16,
-              backgroundColor: C.red,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Text style={{ color: C.text, fontFamily: F.serifReg, fontSize: 40 }}>R</Text>
-          </View>
+          <LogoMark size={80} glow />
           <Text
             style={{
               fontFamily: F.serifItalic,

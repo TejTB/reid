@@ -14,6 +14,7 @@ import { reidFetch } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/constants/colors';
 import { Fonts } from '@/constants/fonts';
+import LogoMark from '@/components/LogoMark';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
@@ -175,18 +176,7 @@ export default function OnboardingChat() {
           borderBottomColor: Colors.border,
         }}
       >
-        <View
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 14,
-            backgroundColor: Colors.accent,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Text style={{ color: Colors.textPrimary, fontFamily: Fonts.serifRegular, fontSize: 15 }}>R</Text>
-        </View>
+        <LogoMark size={28} />
         <Text style={{ fontFamily: Fonts.serifRegular, color: Colors.textPrimary, fontSize: 19, letterSpacing: -0.38 }}>
           Reid
         </Text>

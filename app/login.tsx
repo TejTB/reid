@@ -13,6 +13,7 @@ import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/constants/colors';
 import { Fonts } from '@/constants/fonts';
+import LogoMark from '@/components/LogoMark';
 
 function reidErrorFor(message: string): string {
   const m = message.toLowerCase();
@@ -98,18 +99,7 @@ export default function LoginScreen() {
     >
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}>
         <View style={{ width: '100%', maxWidth: 360, alignItems: 'center' }}>
-          <View
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 24,
-              backgroundColor: Colors.accent,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Text style={{ color: Colors.textPrimary, fontFamily: Fonts.serifRegular, fontSize: 24 }}>R</Text>
-          </View>
+          <LogoMark size={48} />
 
           <Text
             style={{

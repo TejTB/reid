@@ -13,7 +13,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.tbxgrows.reid",
       "infoPlist": {
-        "NSUserNotificationsUsageDescription": "Reid will let you know when he has something for you."
+        "NSUserNotificationsUsageDescription": "Reid will let you know when he has something for you.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -35,6 +36,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "8a4e8058-8d22-4a0a-b057-8ad821dab3f2"
+      }
     }
   }
 }
