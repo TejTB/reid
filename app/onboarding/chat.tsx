@@ -37,8 +37,6 @@ export default function OnboardingChat() {
   const streamStarted = useRef(false);
   const completionTriggered = useRef(false);
 
-  const userTurnCount = messages.filter((m) => m.role === 'user').length;
-
   async function runStream(seed: Msg[]) {
     setIsStreaming(true);
     setStreamingText('');
@@ -184,9 +182,6 @@ export default function OnboardingChat() {
         <LogoMark size={28} />
         <Text style={{ fontFamily: Fonts.serifRegular, color: Colors.textPrimary, fontSize: 19, letterSpacing: -0.38 }}>
           Reid
-        </Text>
-        <Text style={{ marginLeft: 'auto', color: Colors.textDim, fontFamily: Fonts.sansRegular, fontSize: 12 }}>
-          {Math.min(userTurnCount, 3)} / 3
         </Text>
       </View>
 

@@ -57,11 +57,16 @@ export default function LoginScreen() {
         email: e,
         password: p,
       });
-      setSubmitting(false);
       if (error) {
+        setSubmitting(false);
         setErrorMsg(reidErrorFor(error.message));
         return;
       }
+      // Wait for session to persist to AsyncStorage
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const { data: { session } } = await supabase.auth.getSession();
+      console.log('[login] session after wait:', session?.access_token ? 'present' : 'MISSING');
+      setSubmitting(false);
       router.replace('/');
       return;
     }
@@ -70,16 +75,22 @@ export default function LoginScreen() {
       email: e,
       password: p,
     });
-    setSubmitting(false);
     if (error) {
+      setSubmitting(false);
       setErrorMsg(reidErrorFor(error.message));
       return;
     }
     if (!data.session) {
       // Supabase project has email confirmation enabled.
+      setSubmitting(false);
       setErrorMsg('Check your inbox to confirm your account first.');
       return;
     }
+    // Wait for session to persist to AsyncStorage
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const { data: { session } } = await supabase.auth.getSession();
+    console.log('[login] session after wait:', session?.access_token ? 'present' : 'MISSING');
+    setSubmitting(false);
     router.replace('/');
   }
 

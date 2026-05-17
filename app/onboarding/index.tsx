@@ -74,18 +74,6 @@ export default function OnboardingIntro() {
           >
             I{"’"}m Reid. I help founders cut the noise.
           </Text>
-          <Text
-            style={{
-              fontFamily: Fonts.sansRegular,
-              color: Colors.textDim,
-              fontSize: 14,
-              lineHeight: 22,
-              textAlign: 'center',
-              maxWidth: 320,
-            }}
-          >
-            Ten questions. Then we get to work.
-          </Text>
 
           <Animated.View style={{ opacity: fade, marginTop: 6 }}>
             <Pressable
