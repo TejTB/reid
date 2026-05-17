@@ -8,7 +8,6 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/constants/colors';
@@ -65,13 +64,12 @@ export default function LoginScreen() {
     if (!value) return;
     setSubmitting(true);
     setErrorMsg(null);
-    // Must match the path Supabase allows in its "Redirect URLs" allowlist.
-    // Keep this in sync with app/auth/callback.tsx — Linking.createURL builds
-    // `reid://auth/callback` for the configured scheme.
-    const redirectTo = Linking.createURL('/auth/callback');
+    // Hardcoded so the magic link always targets the standalone app
+    // (Linking.createURL returned exp:// URLs under Expo Go which routed
+    // back to the web app). Must be on Supabase's Redirect URLs allowlist.
     const { error } = await supabase.auth.signInWithOtp({
       email: value,
-      options: { emailRedirectTo: redirectTo },
+      options: { emailRedirectTo: 'reid://auth/callback' },
     });
     setSubmitting(false);
     if (error) {
