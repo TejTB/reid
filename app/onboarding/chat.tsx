@@ -9,6 +9,7 @@ import {
   Pressable,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { reidFetch } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
@@ -27,6 +28,7 @@ function stripSentinel(text: string): { body: string; hasSentinel: boolean } {
 }
 
 export default function OnboardingChat() {
+  const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -166,7 +168,7 @@ export default function OnboardingChat() {
     >
       <View
         style={{
-          paddingTop: 18,
+          paddingTop: insets.top + 12,
           paddingHorizontal: 24,
           paddingBottom: 10,
           flexDirection: 'row',
@@ -240,7 +242,7 @@ export default function OnboardingChat() {
         style={{
           paddingHorizontal: 18,
           paddingTop: 10,
-          paddingBottom: Platform.OS === 'ios' ? 18 : 12,
+          paddingBottom: 12 + insets.bottom,
           borderTopWidth: 1,
           borderTopColor: Colors.border,
           flexDirection: 'row',

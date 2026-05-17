@@ -6,6 +6,7 @@ import {
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { C, F, R, S, OBSERVATION_BADGE } from '@/constants/theme';
@@ -36,6 +37,7 @@ function badgeColor(category: string | null): string {
 }
 
 export default function NoticedScreen() {
+  const insets = useSafeAreaInsets();
   const [items, setItems] = useState<Observation[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -93,7 +95,7 @@ export default function NoticedScreen() {
       style={{ flex: 1, backgroundColor: C.bg }}
       contentContainerStyle={{
         paddingHorizontal: 20,
-        paddingTop: 56,
+        paddingTop: insets.top + 16,
         paddingBottom: 32,
       }}
       refreshControl={

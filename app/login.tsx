@@ -8,6 +8,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/constants/colors';
@@ -18,6 +19,7 @@ import { reidErrorFor } from '@/lib/auth-errors';
 type Mode = 'signin' | 'signup';
 
 export default function LoginScreen() {
+  const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<Mode>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -128,6 +130,8 @@ export default function LoginScreen() {
           alignItems: 'center',
           justifyContent: 'center',
           paddingHorizontal: 24,
+          paddingTop: insets.top + 24,
+          paddingBottom: insets.bottom + 24,
         }}
       >
         <View style={{ width: '100%', maxWidth: 360, alignItems: 'center' }}>

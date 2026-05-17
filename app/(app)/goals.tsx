@@ -7,6 +7,7 @@ import {
   Pressable,
   RefreshControl,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowRight } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
@@ -57,6 +58,7 @@ function formatEventDate(iso: string): string {
 }
 
 export default function GoalsScreen() {
+  const insets = useSafeAreaInsets();
   const [goals, setGoals] = useState<Goal[]>([]);
   const [events, setEvents] = useState<GoalEvent[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -139,7 +141,7 @@ export default function GoalsScreen() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: C.bg }}
-      contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 56, paddingBottom: 32 }}
+      contentContainerStyle={{ paddingHorizontal: 20, paddingTop: insets.top + 16, paddingBottom: 32 }}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.red} />
       }

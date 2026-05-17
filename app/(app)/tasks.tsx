@@ -13,6 +13,7 @@ import Animated, {
   withTiming,
   Easing,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Check, CheckCircle } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
@@ -38,6 +39,7 @@ type Task = {
 };
 
 export default function TasksScreen() {
+  const insets = useSafeAreaInsets();
   const [userId, setUserId] = useState<string | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -171,7 +173,7 @@ export default function TasksScreen() {
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 56, paddingBottom: 60 }}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: insets.top + 16, paddingBottom: 60 }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.red} />
         }

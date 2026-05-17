@@ -14,6 +14,7 @@ import Animated, {
   withSequence,
   Easing,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { C, F, S } from '@/constants/theme';
@@ -120,6 +121,7 @@ function PulsingDot() {
 }
 
 export default function PlanScreen() {
+  const insets = useSafeAreaInsets();
   const [user, setUser] = useState<UserData | null>(null);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -220,7 +222,7 @@ export default function PlanScreen() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: C.bg }}
-      contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 56, paddingBottom: 40 }}
+      contentContainerStyle={{ paddingHorizontal: 20, paddingTop: insets.top + 16, paddingBottom: 40 }}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.red} />
       }

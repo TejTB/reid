@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Stack, router, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   useFonts,
   PlayfairDisplay_400Regular,
@@ -165,47 +165,54 @@ export default function RootLayout() {
         <Stack.Screen name="(app)" />
         <Stack.Screen name="upgrade" options={{ presentation: 'modal' }} />
       </Stack>
-      {locked && (
-        <View
+      {locked && <LockedOverlay onUnlock={tryUnlock} />}
+    </SafeAreaProvider>
+  );
+}
+
+function LockedOverlay({ onUnlock }: { onUnlock: () => void }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: C.bg,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingTop: insets.top + 24,
+        paddingBottom: insets.bottom + 24,
+        paddingHorizontal: 24,
+        gap: 22,
+      }}
+    >
+      <LogoMark size={56} />
+      <Text style={{ fontFamily: F.serifItalic, color: C.text, fontSize: 22 }}>Locked</Text>
+      <Pressable
+        onPress={onUnlock}
+        style={{
+          height: 44,
+          paddingHorizontal: 24,
+          borderRadius: 9,
+          backgroundColor: C.red,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Text
           style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: C.bg,
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 24,
-            gap: 22,
+            color: C.text,
+            fontFamily: F.sansMed,
+            fontSize: 13,
+            letterSpacing: 0.5,
           }}
         >
-          <LogoMark size={56} />
-          <Text style={{ fontFamily: F.serifItalic, color: C.text, fontSize: 22 }}>Locked</Text>
-          <Pressable
-            onPress={tryUnlock}
-            style={{
-              height: 44,
-              paddingHorizontal: 24,
-              borderRadius: 9,
-              backgroundColor: C.red,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Text
-              style={{
-                color: C.text,
-                fontFamily: F.sansMed,
-                fontSize: 13,
-                letterSpacing: 0.5,
-              }}
-            >
-              Unlock
-            </Text>
-          </Pressable>
-        </View>
-      )}
-    </SafeAreaProvider>
+          Unlock
+        </Text>
+      </Pressable>
+    </View>
   );
 }

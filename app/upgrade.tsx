@@ -1,4 +1,5 @@
 import { View, Text, Pressable, ScrollView } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { ArrowLeft } from 'lucide-react-native';
@@ -8,20 +9,22 @@ import { Fonts } from '@/constants/fonts';
 const PRICING_URL = 'https://reid-app.vercel.app/pricing';
 
 export default function UpgradeScreen() {
+  const insets = useSafeAreaInsets();
+
   async function openPricing() {
     await WebBrowser.openBrowserAsync(PRICING_URL);
   }
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.bgDark }}>
-      <View style={{ paddingTop: 56, paddingHorizontal: 22, paddingBottom: 12 }}>
+      <View style={{ paddingTop: insets.top + 16, paddingHorizontal: 22, paddingBottom: 12 }}>
         <Pressable onPress={() => router.back()} hitSlop={10} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <ArrowLeft size={16} color={Colors.textDim} />
           <Text style={{ fontFamily: Fonts.sansRegular, fontSize: 13, color: Colors.textDim }}>Back</Text>
         </Pressable>
       </View>
       <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 22, paddingBottom: 40, paddingTop: 8 }}
+        contentContainerStyle={{ paddingHorizontal: 22, paddingBottom: 40 + insets.bottom, paddingTop: 8 }}
       >
         <Text
           style={{

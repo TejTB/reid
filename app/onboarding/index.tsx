@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, Animated } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Colors } from '@/constants/colors';
 import { Fonts } from '@/constants/fonts';
@@ -8,6 +9,7 @@ import LogoMark from '@/components/LogoMark';
 const BEGIN_DELAY_MS = 6000;
 
 export default function OnboardingIntro() {
+  const insets = useSafeAreaInsets();
   const [revealed, setRevealed] = useState(false);
   const [pressed, setPressed] = useState(false);
   const fade = useRef(new Animated.Value(0)).current;
@@ -37,7 +39,9 @@ export default function OnboardingIntro() {
         backgroundColor: Colors.bgDark,
         alignItems: 'center',
         justifyContent: 'center',
-        paddingHorizontal: 24,
+        paddingHorizontal: 32,
+        paddingTop: insets.top + 24,
+        paddingBottom: insets.bottom + 32,
       }}
     >
       <View style={{ width: '100%', maxWidth: 360, alignItems: 'center' }}>
