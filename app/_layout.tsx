@@ -30,7 +30,7 @@ import {
 void SplashScreen.preventAutoHideAsync();
 
 // Routes that must never gate-redirect to /login (the auth flow itself).
-const PUBLIC_PREFIXES = ['/login', '/auth'];
+const PUBLIC_PREFIXES = ['/login', '/verify'];
 
 function isPublicRoute(pathname: string | null | undefined): boolean {
   if (!pathname) return false;
@@ -161,7 +161,7 @@ export default function RootLayout() {
       >
         <Stack.Screen name="index" />
         <Stack.Screen name="login" />
-        <Stack.Screen name="auth/callback" />
+        <Stack.Screen name="verify" />
         <Stack.Screen name="onboarding" />
         <Stack.Screen name="(app)" />
         <Stack.Screen name="upgrade" options={{ presentation: 'modal' }} />
