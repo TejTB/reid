@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowRight, Check } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
@@ -65,6 +66,7 @@ function streakTextFor(user: LoadedUser, now: Date = new Date()): string | null 
 }
 
 export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
   const [user, setUser] = useState<LoadedUser | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -184,7 +186,11 @@ export default function HomeScreen() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: C.bg }}
-      contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 60, paddingBottom: 32 }}
+      contentContainerStyle={{
+        paddingHorizontal: 20,
+        paddingTop: insets.top + 24,
+        paddingBottom: 32,
+      }}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.red} />
       }
