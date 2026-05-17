@@ -8,18 +8,20 @@ export function reidErrorFor(message: string): string {
   ) {
     return 'Too many tries. Wait a minute, then try again.';
   }
-  if (
-    m.includes('invalid login credentials') ||
-    m.includes('invalid email') ||
-    m.includes('invalid_email')
-  ) {
+  if (m.includes('invalid login credentials')) {
+    return 'Email or password is wrong.';
+  }
+  if (m.includes('user already registered') || m.includes('already registered')) {
+    return 'That email already has an account. Sign in instead.';
+  }
+  if (m.includes('password should be') || m.includes('weak password')) {
+    return 'Password needs at least 6 characters.';
+  }
+  if (m.includes('invalid email') || m.includes('invalid_email')) {
     return "That email doesn't look right.";
   }
-  if (m.includes('token has expired') || m.includes('expired')) {
-    return 'That code expired. Resend a new one.';
+  if (m.includes('email not confirmed')) {
+    return 'Check your inbox to confirm your account first.';
   }
-  if (m.includes('invalid token') || m.includes('otp_invalid')) {
-    return 'Wrong code.';
-  }
-  return "Couldn't send the code. Try again.";
+  return "Couldn't sign in. Try again.";
 }
