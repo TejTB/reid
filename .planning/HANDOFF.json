@@ -1,0 +1,266 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-05-26T15:07:27.608Z",
+  "source": "auto-postool",
+  "partial": false,
+  "phase": null,
+  "phase_name": null,
+  "phase_dir": null,
+  "plan": null,
+  "task": null,
+  "total_tasks": null,
+  "status": "auto-checkpoint",
+  "completed_tasks": [],
+  "remaining_tasks": [],
+  "blockers": [],
+  "human_actions_pending": [],
+  "decisions": [],
+  "uncommitted_files": [
+    {
+      "status": "A",
+      "path": ".claude/settings.json"
+    },
+    {
+      "status": "A",
+      "path": ".gitignore"
+    },
+    {
+      "status": "A",
+      "path": ".planning/HANDOFF.json"
+    },
+    {
+      "status": "A",
+      "path": "AGENTS.md"
+    },
+    {
+      "status": "A",
+      "path": "BUILD-NOTES.md"
+    },
+    {
+      "status": "A",
+      "path": "CLAUDE.md"
+    },
+    {
+      "status": "A",
+      "path": "LICENSE"
+    },
+    {
+      "status": "A",
+      "path": "app.json"
+    },
+    {
+      "status": "A",
+      "path": "app/(tabs)/_layout.tsx"
+    },
+    {
+      "status": "A",
+      "path": "app/(tabs)/goals/index.tsx"
+    },
+    {
+      "status": "A",
+      "path": "app/(tabs)/home/index.tsx"
+    },
+    {
+      "status": "A",
+      "path": "app/(tabs)/plan/index.tsx"
+    },
+    {
+      "status": "A",
+      "path": "app/(tabs)/sessions/index.tsx"
+    },
+    {
+      "status": "A",
+      "path": "app/_layout.tsx"
+    },
+    {
+      "status": "A",
+      "path": "app/auth/_layout.tsx"
+    },
+    {
+      "status": "A",
+      "path": "app/auth/login.tsx"
+    },
+    {
+      "status": "A",
+      "path": "app/auth/signup.tsx"
+    },
+    {
+      "status": "A",
+      "path": "app/index.tsx"
+    },
+    {
+      "status": "A",
+      "path": "app/onboarding/_layout.tsx"
+    },
+    {
+      "status": "A",
+      "path": "app/onboarding/chat.tsx"
+    },
+    {
+      "status": "A",
+      "path": "app/onboarding/summary.tsx"
+    },
+    {
+      "status": "A",
+      "path": "assets/android-icon-background.png"
+    },
+    {
+      "status": "A",
+      "path": "assets/android-icon-foreground.png"
+    },
+    {
+      "status": "A",
+      "path": "assets/android-icon-monochrome.png"
+    },
+    {
+      "status": "A",
+      "path": "assets/favicon.png"
+    },
+    {
+      "status": "A",
+      "path": "assets/icon.png"
+    },
+    {
+      "status": "A",
+      "path": "assets/splash-icon.png"
+    },
+    {
+      "status": "A",
+      "path": "components/cards/CurrentFocusCard.tsx"
+    },
+    {
+      "status": "A",
+      "path": "components/cards/GlowCard.tsx"
+    },
+    {
+      "status": "A",
+      "path": "components/cards/NudgeCard.tsx"
+    },
+    {
+      "status": "A",
+      "path": "components/cards/SessionCard.tsx"
+    },
+    {
+      "status": "A",
+      "path": "components/chat/ChatBubble.tsx"
+    },
+    {
+      "status": "A",
+      "path": "components/chat/ChatInput.tsx"
+    },
+    {
+      "status": "A",
+      "path": "components/orb/FloatingOrb.tsx"
+    },
+    {
+      "status": "A",
+      "path": "components/orb/OrbChatModal.tsx"
+    },
+    {
+      "status": "A",
+      "path": "components/orb/ReidOrb.tsx"
+    },
+    {
+      "status": "A",
+      "path": "components/picks/PickCard.tsx"
+    },
+    {
+      "status": "A",
+      "path": "components/picks/PicksCarousel.tsx"
+    },
+    {
+      "status": "A",
+      "path": "components/shared/ReidLogo.tsx"
+    },
+    {
+      "status": "A",
+      "path": "components/shared/TabBar.tsx"
+    },
+    {
+      "status": "A",
+      "path": "hooks/useAuth.ts"
+    },
+    {
+      "status": "A",
+      "path": "hooks/useChat.ts"
+    },
+    {
+      "status": "A",
+      "path": "hooks/useCurrentFocus.ts"
+    },
+    {
+      "status": "A",
+      "path": "hooks/useGoals.ts"
+    },
+    {
+      "status": "A",
+      "path": "hooks/useMicAmplitude.ts"
+    },
+    {
+      "status": "A",
+      "path": "hooks/useOnboarding.ts"
+    },
+    {
+      "status": "A",
+      "path": "hooks/useSessions.ts"
+    },
+    {
+      "status": "A",
+      "path": "hooks/useTasks.ts"
+    },
+    {
+      "status": "A",
+      "path": "lib/anthropic.ts"
+    },
+    {
+      "status": "A",
+      "path": "lib/picks.ts"
+    },
+    {
+      "status": "A",
+      "path": "lib/prompts.ts"
+    },
+    {
+      "status": "A",
+      "path": "lib/session-engine.ts"
+    },
+    {
+      "status": "A",
+      "path": "lib/supabase.ts"
+    },
+    {
+      "status": "A",
+      "path": "lib/theme.ts"
+    },
+    {
+      "status": "A",
+      "path": "lib/types.ts"
+    },
+    {
+      "status": "A",
+      "path": "package-lock.json"
+    },
+    {
+      "status": "A",
+      "path": "package.json"
+    },
+    {
+      "status": "A",
+      "path": "patches/@supabase+supabase-js+2.106.1.patch"
+    },
+    {
+      "status": "A",
+      "path": "reid-env.d.ts"
+    },
+    {
+      "status": "A",
+      "path": "supabase/functions/reid-chat/index.ts"
+    },
+    {
+      "status": "A",
+      "path": "tsconfig.json"
+    }
+  ],
+  "next_action": null,
+  "context_notes": ""
+}
