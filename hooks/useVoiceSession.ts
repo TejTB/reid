@@ -52,6 +52,9 @@ export function useVoiceSession() {
   const playerRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
   const stateRef = useRef<VoiceState>("idle");
   stateRef.current = state;
+  const busyRef = useRef(false);
+  const pulseRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const subRef = useRef<{ remove: () => void } | null>(null);
 
   const refreshEntitlement = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -69,7 +72,8 @@ export function useVoiceSession() {
   useEffect(() => { void refreshEntitlement(); }, [refreshEntitlement]);
 
   const stopRecording = useCallback(async () => {
-    if (stateRef.current !== "recording") return;
+    if (stateRef.current !== "recording" || busyRef.current) return;
+    busyRef.current = true;
     dispatch({ type: "SILENCE" });
     setMicAmplitude(0);
     try {
@@ -79,6 +83,8 @@ export function useVoiceSession() {
       await runTurn(uri);
     } catch {
       dispatch({ type: "ERROR" });
+    } finally {
+      busyRef.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recorder]);
@@ -100,18 +106,23 @@ export function useVoiceSession() {
   }, [recorderState, state]);
 
   const startSession = useCallback(async () => {
-    if (stateRef.current !== "idle") return;
+    if (stateRef.current !== "idle" || busyRef.current) return;
     if (voiceBlocked) { router.push("/upgrade"); return; }
-    const perm = await AudioModule.requestRecordingPermissionsAsync();
-    if (!perm.granted) { setTranscript("Microphone permission denied."); return; }
-    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-    levelsRef.current = [];
-    startedAtRef.current = Date.now();
-    setTranscript("");
-    setReidResponse("");
-    await recorder.prepareToRecordAsync();
-    recorder.record();
-    dispatch({ type: "TAP" });
+    busyRef.current = true;
+    try {
+      const perm = await AudioModule.requestRecordingPermissionsAsync();
+      if (!perm.granted) { setTranscript("Microphone permission denied."); return; }
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      levelsRef.current = [];
+      startedAtRef.current = Date.now();
+      setTranscript("");
+      setReidResponse("");
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      dispatch({ type: "TAP" });
+    } finally {
+      busyRef.current = false;
+    }
   }, [recorder, voiceBlocked]);
 
   async function runTurn(uri: string) {
@@ -167,28 +178,38 @@ export function useVoiceSession() {
       await FileSystem.writeAsStringAsync(fileUri, bytesToBase64(new Uint8Array(buf)), { encoding: FileSystem.EncodingType.Base64 });
 
       playerRef.current?.remove();
+      if (pulseRef.current) { clearInterval(pulseRef.current); pulseRef.current = null; }
+      subRef.current?.remove();
+      subRef.current = null;
+
       const player = createAudioPlayer({ uri: fileUri });
       playerRef.current = player;
-      const pulse = setInterval(() => setPlaybackAmplitude(0.3 + 0.5 * Math.random()), 120);
+      pulseRef.current = setInterval(() => setPlaybackAmplitude(0.3 + 0.5 * Math.random()), 120);
       // (b) CONFIRMED via context7: AudioEvents has "playbackStatusUpdate" with AudioStatus payload.
       // AudioStatus.didJustFinish: boolean — field name confirmed correct.
       const sub = player.addListener("playbackStatusUpdate", (s: AudioStatus) => {
         if (s.didJustFinish) {
-          clearInterval(pulse);
+          if (pulseRef.current) { clearInterval(pulseRef.current); pulseRef.current = null; }
           setPlaybackAmplitude(0);
           sub.remove();
+          subRef.current = null;
           player.remove();
           if (playerRef.current === player) playerRef.current = null;
           dispatch({ type: "PLAYBACK_DONE" });
         }
       });
+      subRef.current = sub;
       player.play();
     } catch {
       dispatch({ type: "PLAYBACK_DONE" });
     }
   }
 
-  useEffect(() => () => { playerRef.current?.remove(); }, []);
+  useEffect(() => () => {
+    playerRef.current?.remove();
+    if (pulseRef.current) clearInterval(pulseRef.current);
+    subRef.current?.remove();
+  }, []);
 
   return {
     sessionState: state,
