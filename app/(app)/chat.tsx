@@ -22,6 +22,7 @@ import Animated, {
   FadeInRight,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useIsFocused } from '@react-navigation/native';
 import { router } from 'expo-router';
 import { ArrowUp, Play, AudioLines } from 'lucide-react-native';
 import { Audio } from 'expo-av';
@@ -237,6 +238,7 @@ type ChatItem =
 
 export default function ChatScreen() {
   const insets = useSafeAreaInsets();
+  const isFocused = useIsFocused();
   const { messages } = useConversation();
   const [streamingText, setStreamingText] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -395,15 +397,24 @@ export default function ChatScreen() {
     [],
   );
 
-  // Pro + voice toggle ON: auto-play each new Reid message exactly once.
+  // Pro + voice toggle ON: auto-play each new Reid message exactly once — but
+  // only while the chat screen is focused. The conversation store is shared
+  // with the voice screen, which does its own playback; without the focus
+  // guard, chat (still mounted under the voice modal) would double-play voice
+  // replies. While unfocused we still mark the latest reply as seen so it
+  // isn't replayed when chat regains focus.
   useEffect(() => {
     if (!isPro || !voiceEnabled || isStreaming || messages.length === 0) return;
     const last = messages[messages.length - 1];
     if (last.role !== 'assistant') return;
+    if (!isFocused) {
+      lastPlayedRef.current = last.content;
+      return;
+    }
     if (lastPlayedRef.current === last.content) return;
     lastPlayedRef.current = last.content;
     void playMessage(last.content, false);
-  }, [messages, isStreaming, voiceEnabled, isPro, playMessage]);
+  }, [messages, isStreaming, voiceEnabled, isPro, playMessage, isFocused]);
 
   async function runReid(seed: Msg[]) {
     setIsStreaming(true);
