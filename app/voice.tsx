@@ -22,19 +22,19 @@ export default function VoiceScreen() {
     playbackAmplitude: vs.playbackAmplitude,
   });
 
-  // Recap on exit (fire-and-forget) if this visit had a voice exchange.
+  const { hadExchangeRef } = vs;
+  // Recap on exit (fire-and-forget) only if a real voice turn happened this visit.
   useEffect(() => {
     return () => {
       const sid = convo.getSnapshot().sessionId;
-      const hadVoice = convo.getSnapshot().messages.some((m) => m.role === "assistant");
-      if (sid && hadVoice) {
+      if (sid && hadExchangeRef.current) {
         void reidFetch("/api/session-recap", {
           method: "POST",
           body: JSON.stringify({ session_id: sid }),
         }).catch(() => {});
       }
     };
-  }, []);
+  }, [hadExchangeRef]);
 
   const status =
     vs.voiceBlocked ? "upgrade to continue"
