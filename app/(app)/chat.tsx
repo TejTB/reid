@@ -23,7 +23,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { ArrowUp, Play } from 'lucide-react-native';
+import { ArrowUp, Play, AudioLines } from 'lucide-react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Haptics from 'expo-haptics';
@@ -32,8 +32,10 @@ import { reidFetch } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { C, F, R } from '@/constants/theme';
 import ReidThinking from '@/components/ReidThinking';
-
-type Msg = { role: 'user' | 'assistant'; content: string };
+import type { Msg } from '@/lib/conversationStore';
+import * as convo from '@/lib/conversationStore';
+import { useConversation } from '@/hooks/useConversation';
+import { stripReidStream } from '@/lib/voice/strip';
 
 const VOICE_PREF_KEY = 'reid_voice_enabled';
 const LAST_SEEN_KEY = 'reid:lastSeenReidMessageAt';
@@ -42,8 +44,6 @@ const LAST_SEEN_KEY = 'reid:lastSeenReidMessageAt';
 // migrate the opener into that table and remove this local flag.
 const OPENING_SENT_KEY = 'reid:openingSent';
 const OPENING_LINE = "I've been waiting. What are you building?";
-
-let cachedSessionId: string | null = null;
 
 // Base64-encode the audio ArrayBuffer for FileSystem.writeAsStringAsync. We
 // avoid `Buffer.from(...).toString("base64")` because the Hermes runtime
@@ -237,7 +237,7 @@ type ChatItem =
 
 export default function ChatScreen() {
   const insets = useSafeAreaInsets();
-  const [messages, setMessages] = useState<Msg[]>([]);
+  const { messages } = useConversation();
   const [streamingText, setStreamingText] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [input, setInput] = useState('');
@@ -249,7 +249,6 @@ export default function ChatScreen() {
   const [isPro, setIsPro] = useState(false);
   const [lastSessionAt, setLastSessionAt] = useState<string | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
-  const sessionIdRef = useRef<string | null>(cachedSessionId);
   const lastPlayedRef = useRef<string | null>(null);
   const flatListRef = useRef<FlatList<ChatItem> | null>(null);
 
@@ -282,13 +281,11 @@ export default function ChatScreen() {
       // TODO: when a Supabase conversation_history / messages table exists,
       // persist this message there (with role: 'assistant') and load history
       // here instead of relying on AsyncStorage's `OPENING_SENT_KEY`.
-      if (!openingSent) {
-        setMessages([{ role: 'assistant', content: OPENING_LINE }]);
-        void AsyncStorage.setItem(OPENING_SENT_KEY, new Date().toISOString());
-      } else {
-        // Even on reload, never show empty state — Reid still opened the
-        // conversation, so render that line (no fresh animation).
-        setMessages([{ role: 'assistant', content: OPENING_LINE }]);
+      if (convo.getSnapshot().messages.length === 0) {
+        convo.setMessages([{ role: 'assistant', content: OPENING_LINE }]);
+        if (!openingSent) {
+          void AsyncStorage.setItem(OPENING_SENT_KEY, new Date().toISOString());
+        }
       }
 
       void AsyncStorage.setItem(LAST_SEEN_KEY, new Date().toISOString());
@@ -417,13 +414,13 @@ export default function ChatScreen() {
         method: 'POST',
         body: JSON.stringify({
           mode: 'chat',
-          sessionId: sessionIdRef.current,
+          sessionId: convo.getSnapshot().sessionId,
           messages: seed,
         }),
       });
       if (res.status === 429) {
         setIsStreaming(false);
-        setMessages((prev) => prev.slice(0, -1));
+        convo.dropLast();
         Alert.alert('Daily limit reached', 'Upgrade for unlimited sessions.', [
           { text: 'Not now', style: 'cancel' },
           { text: 'Upgrade', onPress: () => router.push('/upgrade') },
@@ -437,8 +434,7 @@ export default function ChatScreen() {
       }
       const sid = res.headers.get('X-Reid-Session-Id') ?? res.headers.get('x-reid-session-id');
       if (sid) {
-        sessionIdRef.current = sid;
-        cachedSessionId = sid;
+        convo.setSessionId(sid);
       }
       const body = res.body as ReadableStream<Uint8Array> | null | undefined;
       if (body && typeof body.getReader === 'function') {
@@ -449,24 +445,21 @@ export default function ChatScreen() {
           if (done) break;
           if (value) {
             acc += decoder.decode(value, { stream: true });
-            setStreamingText(acc);
+            setStreamingText(stripReidStream(acc));
           }
         }
       } else {
         acc = await res.text();
-        setStreamingText(acc);
+        setStreamingText(stripReidStream(acc));
       }
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e);
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: `Something's off on my end. (${detail})` },
-      ]);
+      convo.append({ role: 'assistant', content: `Something's off on my end. (${detail})` });
       setStreamingText('');
       setIsStreaming(false);
       return;
     }
-    setMessages((prev) => [...prev, { role: 'assistant', content: acc }]);
+    convo.append({ role: 'assistant', content: stripReidStream(acc) });
     setStreamingText('');
     setIsStreaming(false);
   }
@@ -474,10 +467,9 @@ export default function ChatScreen() {
   async function handleSend() {
     const trimmed = input.trim();
     if (!trimmed || isStreaming) return;
-    const next: Msg[] = [...messages, { role: 'user', content: trimmed }];
     setInput('');
-    setMessages(next);
-    await runReid(next);
+    convo.append({ role: 'user', content: trimmed });
+    await runReid(convo.getSnapshot().messages);
   }
 
   async function onHearReid() {
@@ -545,6 +537,9 @@ export default function ChatScreen() {
           borderBottomColor: C.border,
         }}
       >
+        <Pressable onPress={() => router.push('/voice' as any)} hitSlop={12} style={{ marginRight: 14 }}>
+          <AudioLines size={24} color={C.muted} />
+        </Pressable>
         <View style={{ flex: 1 }}>
           <Text style={{ fontFamily: F.serifReg, fontSize: 18, color: C.text }}>Reid</Text>
           <Text style={{ fontFamily: F.sans, fontSize: 12, color: C.muted, marginTop: 2 }}>
