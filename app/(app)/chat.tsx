@@ -537,7 +537,13 @@ export default function ChatScreen() {
           borderBottomColor: C.border,
         }}
       >
-        <Pressable onPress={() => router.push('/voice' as any)} hitSlop={12} style={{ marginRight: 14 }}>
+        <Pressable
+          // Cast: typed routes regenerate on the next expo build (the dev-client
+          // rebuild needed for expo-audio); /voice is a real route at app/voice.tsx.
+          onPress={() => router.push('/voice' as unknown as Parameters<typeof router.push>[0])}
+          hitSlop={12}
+          style={{ marginRight: 14 }}
+        >
           <AudioLines size={24} color={C.muted} />
         </Pressable>
         <View style={{ flex: 1 }}>
