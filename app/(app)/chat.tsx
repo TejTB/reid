@@ -551,7 +551,7 @@ export default function ChatScreen() {
         <Pressable
           // Cast: typed routes regenerate on the next expo build (the dev-client
           // rebuild needed for expo-audio); /voice is a real route at app/voice.tsx.
-          onPress={() => router.push('/voice' as unknown as Parameters<typeof router.push>[0])}
+          onPress={() => router.replace('/voice' as unknown as Parameters<typeof router.replace>[0])}
           hitSlop={12}
           style={{ marginRight: 14 }}
         >

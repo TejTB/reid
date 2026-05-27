@@ -47,7 +47,7 @@ export default function VoiceScreen() {
       <StatusBar style="light" hidden />
       <View style={{ paddingTop: insets.top + 12, paddingHorizontal: 20, height: 56 + insets.top, flexDirection: "row", alignItems: "center" }}>
         <View style={{ flex: 1 }}><LogoMark size={28} /></View>
-        <Pressable onPress={() => router.back()} hitSlop={16}>
+        <Pressable onPress={() => router.replace('/(app)/chat')} hitSlop={16}>
           <MessageCircle size={24} color={C.muted} />
         </Pressable>
       </View>

@@ -107,7 +107,7 @@ export default function OnboardingChat() {
     if (completionTriggered.current) return;
     completionTriggered.current = true;
     setCompleting(true);
-    setTimeout(() => router.replace('/(app)/home'), 1800);
+    setTimeout(() => router.replace('/voice'), 1800);
   }
 
   useEffect(() => {

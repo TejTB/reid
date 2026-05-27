@@ -48,7 +48,7 @@ export default function Index() {
         }
 
         if (user.onboarding_complete) {
-          router.replace('/(app)/home');
+          router.replace('/voice');
         } else {
           router.replace('/onboarding');
         }
