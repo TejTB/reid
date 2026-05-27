@@ -55,6 +55,8 @@ export function useVoiceSession() {
   const busyRef = useRef(false);
   const pulseRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const subRef = useRef<{ remove: () => void } | null>(null);
+  const hadExchangeRef = useRef(false);
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshEntitlement = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -78,6 +80,7 @@ export function useVoiceSession() {
     setMicAmplitude(0);
     try {
       await recorder.stop();
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
       const uri = recorder.uri;
       if (!uri) throw new Error("no recording uri");
       await runTurn(uri);
@@ -143,7 +146,7 @@ export function useVoiceSession() {
       method: "POST",
       body: JSON.stringify({ mode: "chat", voice: true, sessionId: convo.getSnapshot().sessionId, messages: convo.getSnapshot().messages }),
     });
-    if (!rRes.ok) { dispatch({ type: "ERROR" }); return; }
+    if (!rRes.ok) { dispatch({ type: "ERROR" }); convo.dropLast(); return; }
     const sid = rRes.headers.get("X-Reid-Session-Id") ?? rRes.headers.get("x-reid-session-id");
     if (sid) convo.setSessionId(sid);
     let acc = "";
@@ -162,6 +165,7 @@ export function useVoiceSession() {
     }
     const reply = stripReidStream(acc).trim();
     convo.append({ role: "assistant", content: reply });
+    hadExchangeRef.current = true;
 
     dispatch({ type: "REPLY_READY" });
     await playReply(reply);
@@ -181,24 +185,31 @@ export function useVoiceSession() {
       if (pulseRef.current) { clearInterval(pulseRef.current); pulseRef.current = null; }
       subRef.current?.remove();
       subRef.current = null;
+      if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
 
       const player = createAudioPlayer({ uri: fileUri });
       playerRef.current = player;
-      pulseRef.current = setInterval(() => setPlaybackAmplitude(0.3 + 0.5 * Math.random()), 120);
+
+      const finishPlayback = () => {
+        if (pulseRef.current) { clearInterval(pulseRef.current); pulseRef.current = null; }
+        if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
+        setPlaybackAmplitude(0);
+        subRef.current?.remove();
+        subRef.current = null;
+        if (playerRef.current === player) { player.remove(); playerRef.current = null; }
+        dispatch({ type: "PLAYBACK_DONE" });
+      };
+
       // (b) CONFIRMED via context7: AudioEvents has "playbackStatusUpdate" with AudioStatus payload.
       // AudioStatus.didJustFinish: boolean — field name confirmed correct.
+      pulseRef.current = setInterval(() => setPlaybackAmplitude(0.3 + 0.5 * Math.random()), 120);
       const sub = player.addListener("playbackStatusUpdate", (s: AudioStatus) => {
-        if (s.didJustFinish) {
-          if (pulseRef.current) { clearInterval(pulseRef.current); pulseRef.current = null; }
-          setPlaybackAmplitude(0);
-          sub.remove();
-          subRef.current = null;
-          player.remove();
-          if (playerRef.current === player) playerRef.current = null;
-          dispatch({ type: "PLAYBACK_DONE" });
-        }
+        if (s.didJustFinish) finishPlayback();
       });
       subRef.current = sub;
+      // Watchdog: if playback never reports completion (interruption, decode
+      // error, audio-route change), don't strand the FSM in "playing".
+      watchdogRef.current = setTimeout(finishPlayback, 60000);
       player.play();
     } catch {
       dispatch({ type: "PLAYBACK_DONE" });
@@ -208,6 +219,7 @@ export function useVoiceSession() {
   useEffect(() => () => {
     playerRef.current?.remove();
     if (pulseRef.current) clearInterval(pulseRef.current);
+    if (watchdogRef.current) clearTimeout(watchdogRef.current);
     subRef.current?.remove();
   }, []);
 
@@ -221,5 +233,6 @@ export function useVoiceSession() {
     startSession,
     stopRecording,
     refreshEntitlement,
+    hadExchangeRef,
   };
 }
