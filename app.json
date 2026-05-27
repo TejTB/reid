@@ -14,7 +14,8 @@
       "bundleIdentifier": "com.tbxgrows.reid",
       "infoPlist": {
         "NSUserNotificationsUsageDescription": "Reid will let you know when he has something for you.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "Reid needs your microphone so you can talk to him."
       }
     },
     "android": {
@@ -32,7 +33,13 @@
           "color": "#B91C1C"
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Reid needs your microphone so you can talk to him."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
