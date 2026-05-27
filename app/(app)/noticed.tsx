@@ -4,12 +4,14 @@ import {
   Text,
   ScrollView,
   RefreshControl,
-  ActivityIndicator,
 } from 'react-native';
+import Animated, { FadeInUp } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { format } from 'date-fns';
 import { supabase } from '@/lib/supabase';
-import { C, F, R, S, OBSERVATION_BADGE } from '@/constants/theme';
+import { C, F, S, OBSERVATION_BADGE } from '@/constants/theme';
+import ReidPulse from '@/components/ReidPulse';
 
 type Observation = {
   id: string;
@@ -17,14 +19,6 @@ type Observation = {
   category: string | null;
   created_at: string;
 };
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
-}
 
 function badgeLabel(category: string | null): string {
   if (!category) return 'NOTED';
@@ -85,7 +79,7 @@ export default function NoticedScreen() {
           justifyContent: 'center',
         }}
       >
-        <ActivityIndicator color={C.red} />
+        <ReidPulse size={48} />
       </View>
     );
   }
@@ -96,14 +90,11 @@ export default function NoticedScreen() {
       contentContainerStyle={{
         paddingHorizontal: 20,
         paddingTop: insets.top + 16,
-        paddingBottom: 32,
+        paddingBottom: 48,
       }}
+      contentInsetAdjustmentBehavior="never"
       refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          tintColor={C.red}
-        />
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.red} />
       }
     >
       <Text
@@ -111,11 +102,11 @@ export default function NoticedScreen() {
           fontFamily: F.serifReg,
           color: C.text,
           fontSize: 28,
-          letterSpacing: -0.6,
+          letterSpacing: -0.5,
           lineHeight: 34,
         }}
       >
-        Noticed
+        What Reid{"'"}s Noticed
       </Text>
       <Text
         style={{
@@ -125,7 +116,7 @@ export default function NoticedScreen() {
           marginTop: 6,
         }}
       >
-        What Reid is picking up on.
+        Patterns you might have missed.
       </Text>
 
       {items.length === 0 ? (
@@ -139,7 +130,7 @@ export default function NoticedScreen() {
           <Text
             style={{
               fontFamily: F.serifItalic,
-              fontSize: 22,
+              fontSize: 18,
               color: C.muted,
               textAlign: 'center',
             }}
@@ -149,7 +140,7 @@ export default function NoticedScreen() {
           <Text
             style={{
               fontFamily: F.sans,
-              fontSize: 13,
+              fontSize: 14,
               color: C.muted,
               marginTop: 10,
               maxWidth: 320,
@@ -157,71 +148,77 @@ export default function NoticedScreen() {
               lineHeight: 20,
             }}
           >
-            Reid logs observations as he gets to know you. Have a few sessions.
+            Reid logs observations as he gets to know you. Have a few real sessions.
           </Text>
         </View>
       ) : (
-        <View style={{ marginTop: 28, gap: 14 }}>
-          {items.map((obs) => (
-            <View
-              key={obs.id}
-              style={{
-                backgroundColor: C.surface,
-                borderRadius: R.md,
-                borderWidth: 1,
-                borderColor: C.border,
-                padding: 18,
-              }}
-            >
-              <View
+        <View style={{ marginTop: 24, gap: 12 }}>
+          {items.map((obs, i) => {
+            const color = badgeColor(obs.category);
+            return (
+              <Animated.View
+                key={obs.id}
+                entering={FadeInUp.duration(380).delay(i * 60)}
                 style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  marginBottom: 14,
+                  backgroundColor: C.surfaceGlass,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                  borderLeftWidth: 2,
+                  borderLeftColor: color,
+                  padding: 20,
                 }}
               >
                 <View
                   style={{
-                    paddingVertical: 4,
-                    paddingHorizontal: 10,
-                    backgroundColor: badgeColor(obs.category),
-                    borderRadius: R.sm,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: 12,
                   }}
                 >
-                  <Text
+                  <View
                     style={{
-                      fontFamily: F.sansMed,
-                      fontSize: 10,
-                      color: '#FFFFFF',
-                      letterSpacing: 1.1,
+                      paddingVertical: 3,
+                      paddingHorizontal: 9,
+                      backgroundColor: color,
+                      borderRadius: 999,
                     }}
                   >
-                    {badgeLabel(obs.category)}
+                    <Text
+                      style={{
+                        fontFamily: F.sansMed,
+                        fontSize: 10,
+                        color: '#FFFFFF',
+                        letterSpacing: 0.88,
+                      }}
+                    >
+                      {badgeLabel(obs.category)}
+                    </Text>
+                  </View>
+                  <Text
+                    style={{
+                      fontFamily: F.sans,
+                      fontSize: 12,
+                      color: C.muted,
+                    }}
+                  >
+                    {format(new Date(obs.created_at), 'MMM d')}
                   </Text>
                 </View>
                 <Text
                   style={{
-                    fontFamily: F.sans,
-                    fontSize: 12,
-                    color: C.muted,
+                    fontFamily: F.serifItalic,
+                    fontSize: 17,
+                    lineHeight: 26,
+                    color: C.text,
                   }}
                 >
-                  {formatDate(obs.created_at)}
+                  {obs.text}
                 </Text>
-              </View>
-              <Text
-                style={{
-                  fontFamily: F.serifItalic,
-                  fontSize: 16,
-                  lineHeight: 24,
-                  color: C.text,
-                }}
-              >
-                {obs.text}
-              </Text>
-            </View>
-          ))}
+              </Animated.View>
+            );
+          })}
         </View>
       )}
     </ScrollView>

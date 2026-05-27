@@ -3,7 +3,6 @@ import {
   View,
   Text,
   ScrollView,
-  ActivityIndicator,
   RefreshControl,
 } from 'react-native';
 import Animated, {
@@ -12,32 +11,23 @@ import Animated, {
   withTiming,
   withRepeat,
   withSequence,
+  FadeInUp,
   Easing,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { format, isToday, isYesterday } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { C, F, S } from '@/constants/theme';
+import ReidPulse from '@/components/ReidPulse';
 
-const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-function formatNodeDate(iso: string | null | undefined, now: Date = new Date()): string {
+function formatNodeDate(iso: string | null | undefined): string {
   if (!iso) return '';
-  const then = new Date(iso);
-  if (Number.isNaN(then.getTime())) return '';
-  const sameDay =
-    then.getFullYear() === now.getFullYear() &&
-    then.getMonth() === now.getMonth() &&
-    then.getDate() === now.getDate();
-  if (sameDay) return 'Today';
-  const y = new Date(now);
-  y.setDate(now.getDate() - 1);
-  const isYesterday =
-    then.getFullYear() === y.getFullYear() &&
-    then.getMonth() === y.getMonth() &&
-    then.getDate() === y.getDate();
-  if (isYesterday) return 'Yesterday';
-  return `${MONTHS_SHORT[then.getMonth()]} ${then.getDate()}`;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  if (isToday(d)) return 'Today';
+  if (isYesterday(d)) return 'Yesterday';
+  return format(d, 'MMM d');
 }
 
 type UserData = {
@@ -50,32 +40,41 @@ type SessionRow = {
   started_at: string;
   ended_at: string | null;
   summary: string | null;
+  status?: string | null;
 };
 
 type Node =
-  | { kind: 'start'; label: string; date: string; summary: string; active: false; locked: false }
-  | { kind: 'session'; label: string; date: string; summary: string | null; active: boolean; locked: false }
-  | { kind: 'future'; label: string; date: ''; summary: null; active: false; locked: true };
+  | { kind: 'start'; index: number; label: string; date: string; summary: string }
+  | {
+      kind: 'session';
+      index: number;
+      label: string;
+      date: string;
+      summary: string | null;
+      active: boolean;
+    }
+  | { kind: 'future'; index: number; label: string };
 
 const FUTURE_SLOTS = 2;
 
 function PulsingDot() {
   const scale = useSharedValue(1);
-  const opacity = useSharedValue(0.6);
+  const opacity = useSharedValue(0.55);
 
   useEffect(() => {
+    // 1 → 1.4 → 1, looping at 1500ms total.
     scale.value = withRepeat(
       withSequence(
-        withTiming(1.4, { duration: 800, easing: Easing.out(Easing.quad) }),
-        withTiming(1, { duration: 0 }),
+        withTiming(1.4, { duration: 750, easing: Easing.out(Easing.cubic) }),
+        withTiming(1, { duration: 750, easing: Easing.in(Easing.cubic) }),
       ),
       -1,
       false,
     );
     opacity.value = withRepeat(
       withSequence(
-        withTiming(0, { duration: 800, easing: Easing.out(Easing.quad) }),
-        withTiming(0.6, { duration: 0 }),
+        withTiming(0, { duration: 750, easing: Easing.out(Easing.cubic) }),
+        withTiming(0.55, { duration: 750, easing: Easing.in(Easing.cubic) }),
       ),
       -1,
       false,
@@ -90,8 +89,8 @@ function PulsingDot() {
   return (
     <View
       style={{
-        width: 10,
-        height: 10,
+        width: 12,
+        height: 12,
         alignItems: 'center',
         justifyContent: 'center',
       }}
@@ -100,9 +99,9 @@ function PulsingDot() {
         style={[
           {
             position: 'absolute',
-            width: 10,
-            height: 10,
-            borderRadius: 5,
+            width: 12,
+            height: 12,
+            borderRadius: 6,
             backgroundColor: C.red,
           },
           ring,
@@ -110,9 +109,9 @@ function PulsingDot() {
       />
       <View
         style={{
-          width: 10,
-          height: 10,
-          borderRadius: 5,
+          width: 12,
+          height: 12,
+          borderRadius: 6,
           backgroundColor: C.red,
         }}
       />
@@ -141,7 +140,7 @@ export default function PlanScreen() {
         .maybeSingle(),
       supabase
         .from('sessions')
-        .select('id, started_at, ended_at, summary')
+        .select('id, started_at, ended_at, summary, status')
         .order('started_at', { ascending: true }),
     ]);
     setUser((userRes.data as UserData | null) ?? null);
@@ -173,56 +172,52 @@ export default function PlanScreen() {
       <View
         style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' }}
       >
-        <ActivityIndicator color={C.red} />
+        <ReidPulse size={48} />
       </View>
     );
   }
 
-  // Build the timeline. NEVER fabricate "session in progress" — only show real
-  // sessions plus a fixed number of dim future placeholders.
   const onboardingSummary = user?.onboarding_summary?.trim() ?? '';
   const nodes: Node[] = [];
 
   if (onboardingSummary) {
     nodes.push({
       kind: 'start',
+      index: 0,
       label: 'STARTING POINT',
       date: formatNodeDate(user?.created_at),
       summary: onboardingSummary,
-      active: false,
-      locked: false,
     });
   }
 
   sessions.forEach((s, i) => {
-    const completed = !!s.ended_at;
-    const active = !completed && i === sessions.length - 1;
+    // Active = status explicitly 'active'. Fall back to "no end + last row"
+    // ONLY if the schema doesn't include `status` yet.
+    const active = s.status === 'active' || (!s.status && !s.ended_at && i === sessions.length - 1);
     nodes.push({
       kind: 'session',
+      index: nodes.length,
       label: `SESSION ${i + (onboardingSummary ? 2 : 1)}`,
       date: formatNodeDate(s.started_at),
       summary: s.summary?.trim() || null,
       active,
-      locked: false,
     });
   });
 
-  const baseSession = nodes.filter((n) => n.kind !== 'future').length + (onboardingSummary ? 0 : 0);
+  const realCount = nodes.length;
   for (let i = 0; i < FUTURE_SLOTS; i++) {
     nodes.push({
       kind: 'future',
-      label: `SESSION ${baseSession + i + 1}`,
-      date: '',
-      summary: null,
-      active: false,
-      locked: true,
+      index: realCount + i,
+      label: `SESSION ${realCount + i + 1}`,
     });
   }
 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: C.bg }}
-      contentContainerStyle={{ paddingHorizontal: 20, paddingTop: insets.top + 16, paddingBottom: 40 }}
+      contentContainerStyle={{ paddingHorizontal: 20, paddingTop: insets.top + 16, paddingBottom: 56 }}
+      contentInsetAdjustmentBehavior="never"
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.red} />
       }
@@ -232,7 +227,7 @@ export default function PlanScreen() {
           fontFamily: F.serifReg,
           color: C.text,
           fontSize: 28,
-          letterSpacing: -0.6,
+          letterSpacing: -0.5,
           lineHeight: 34,
         }}
       >
@@ -242,23 +237,24 @@ export default function PlanScreen() {
         Built session by session.
       </Text>
 
-      <View style={{ marginTop: 36, position: 'relative' }}>
+      {/* Timeline. Vertical line at x=11, content offset to x=32. */}
+      <View style={{ marginTop: 32, position: 'relative' }}>
         {nodes.length > 1 && (
           <View
             pointerEvents="none"
             style={{
               position: 'absolute',
-              left: 4.5,
+              left: 11,
               top: 6,
               bottom: 6,
               width: 1,
-              backgroundColor: 'rgba(255,255,255,0.12)',
+              backgroundColor: 'rgba(255,255,255,0.10)',
             }}
           />
         )}
         <View style={{ gap: S.xl }}>
           {nodes.map((node, i) => (
-            <TimelineRow key={`n-${i}`} node={node} />
+            <TimelineRow key={`n-${i}`} node={node} delay={i * 60} />
           ))}
         </View>
       </View>
@@ -266,102 +262,111 @@ export default function PlanScreen() {
   );
 }
 
-function TimelineRow({ node }: { node: Node }) {
+function TimelineRow({ node, delay = 0 }: { node: Node; delay?: number }) {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 18 }}>
-      <View style={{ width: 10, marginTop: 6, alignItems: 'center' }}>
-        {node.locked ? (
+    <Animated.View
+      entering={FadeInUp.duration(360).delay(delay)}
+      style={{ flexDirection: 'row', alignItems: 'flex-start' }}
+    >
+      {/* Dot column — width 22, dot centered at x=11. Content sits at x=32. */}
+      <View style={{ width: 22, alignItems: 'center', marginTop: 4 }}>
+        {node.kind === 'future' ? (
           <View
             style={{
-              width: 10,
-              height: 10,
-              borderRadius: 5,
-              borderWidth: 2,
-              borderColor: C.border,
-              backgroundColor: C.bg,
+              width: 12,
+              height: 12,
+              borderRadius: 6,
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.15)',
+              backgroundColor: 'transparent',
             }}
           />
-        ) : node.active ? (
+        ) : node.kind === 'session' && node.active ? (
           <PulsingDot />
         ) : (
           <View
             style={{
-              width: 10,
-              height: 10,
-              borderRadius: 5,
+              width: 12,
+              height: 12,
+              borderRadius: 6,
               backgroundColor: C.red,
             }}
           />
         )}
       </View>
-      <View style={{ flex: 1, opacity: node.locked ? 0.4 : 1 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 12 }}>
-          <Text
-            style={{
-              fontFamily: F.sansMed,
-              fontSize: 11,
-              letterSpacing: 1.3,
-              color: C.muted,
-            }}
-          >
-            {node.label}
-          </Text>
-          {node.date && (
-            <Text style={{ fontFamily: F.sans, fontSize: 12, color: C.muted }}>· {node.date}</Text>
-          )}
-        </View>
-        {node.kind === 'start' ? (
-          <Text
-            style={{
-              fontFamily: F.serifItalic,
-              fontSize: 17,
-              color: C.text,
-              marginTop: 6,
-              lineHeight: 26,
-            }}
-          >
-            {node.summary}
-          </Text>
-        ) : node.kind === 'session' ? (
-          node.summary ? (
-            <Text
-              style={{
-                fontFamily: F.serifItalic,
-                fontSize: 17,
-                color: C.text,
-                marginTop: 6,
-                lineHeight: 26,
-              }}
-            >
-              {node.summary}
-            </Text>
-          ) : (
-            <Text
-              style={{
-                fontFamily: F.sans,
-                fontSize: 13,
-                color: C.muted,
-                marginTop: 6,
-                lineHeight: 20,
-              }}
-            >
-              {node.active ? 'In session with Reid right now.' : 'No summary yet.'}
-            </Text>
-          )
-        ) : (
+      <View style={{ flex: 1, marginLeft: 10 }}>
+        {node.kind === 'future' ? (
           <Text
             style={{
               fontFamily: F.sans,
               fontSize: 13,
-              color: C.muted,
-              marginTop: 6,
-              fontStyle: 'italic',
+              color: C.textDim,
+              letterSpacing: 0.88,
             }}
           >
-            Not yet
+            {node.label}
           </Text>
+        ) : node.kind === 'session' && node.active ? (
+          <Text
+            style={{
+              fontFamily: F.sans,
+              fontSize: 13,
+              color: C.red,
+            }}
+          >
+            {node.label} — Active now
+          </Text>
+        ) : (
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+            <Text
+              style={{
+                fontFamily: F.sansMed,
+                fontSize: 11,
+                letterSpacing: 0.88,
+                color: C.muted,
+                textTransform: 'uppercase',
+              }}
+            >
+              {node.label}
+            </Text>
+            {'date' in node && node.date ? (
+              <Text style={{ fontFamily: F.sans, fontSize: 12, color: C.muted }}>· {node.date}</Text>
+            ) : null}
+          </View>
         )}
+        {node.kind === 'start' ? (
+          <Text
+            style={{
+              fontFamily: F.serifItalic,
+              fontSize: 16,
+              color: C.text,
+              marginTop: 6,
+              lineHeight: 24,
+            }}
+          >
+            {node.summary}
+          </Text>
+        ) : node.kind === 'session' && node.summary && !node.active ? (
+          <Text
+            style={{
+              fontFamily: F.serifItalic,
+              fontSize: 16,
+              color: C.text,
+              marginTop: 6,
+              lineHeight: 24,
+            }}
+          >
+            {node.summary}
+          </Text>
+        ) : null}
       </View>
-    </View>
+    </Animated.View>
   );
 }
+
+/*
+ TODO (db): sessions.status column (text) with values:
+   - 'active'    — exactly one row at a time
+   - 'completed' — has ended_at
+   We fall back to "no end + most recent row" when status is missing.
+*/

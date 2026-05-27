@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Tabs, usePathname } from 'expo-router';
 import { View } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withSequence,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Home,
@@ -15,9 +21,11 @@ import { supabase } from '@/lib/supabase';
 import { C, F } from '@/constants/theme';
 
 const LAST_SEEN_KEY = 'reid:lastSeenReidMessageAt';
+const INACTIVE_COLOR = 'rgba(242,237,227,0.35)';
 
-// Custom tabBarIcon wrapper: 2px red line above an active icon, nothing for
-// inactive — matches the spec's "active = red rail, inactive = muted glyph".
+// Wraps each icon to:
+//   1. Draw the 2px red rail above when focused
+//   2. Pulse-scale (1 → 1.15 → 1) every time `focused` flips to true
 function TabIconShell({
   focused,
   children,
@@ -25,6 +33,21 @@ function TabIconShell({
   focused: boolean;
   children: React.ReactNode;
 }) {
+  const scale = useSharedValue(1);
+
+  useEffect(() => {
+    if (focused) {
+      scale.value = withSequence(
+        withSpring(1.15, { damping: 10, stiffness: 260 }),
+        withSpring(1, { damping: 12, stiffness: 220 }),
+      );
+    }
+  }, [focused, scale]);
+
+  const style = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
   return (
     <View style={{ alignItems: 'center', justifyContent: 'flex-start', height: 28, paddingTop: 4 }}>
       <View
@@ -36,7 +59,7 @@ function TabIconShell({
           marginBottom: 4,
         }}
       />
-      {children}
+      <Animated.View style={style}>{children}</Animated.View>
     </View>
   );
 }
@@ -137,12 +160,12 @@ export default function AppLayout() {
           backgroundColor: C.bg,
           borderTopColor: C.border,
           borderTopWidth: 1,
-          height: 60 + insets.bottom,
+          height: 56 + insets.bottom,
           paddingBottom: insets.bottom,
-          paddingTop: 6,
+          paddingTop: 8,
         },
         tabBarActiveTintColor: C.text,
-        tabBarInactiveTintColor: C.muted,
+        tabBarInactiveTintColor: INACTIVE_COLOR,
         tabBarLabelStyle: {
           fontFamily: F.sans,
           fontSize: 10,

@@ -6,14 +6,15 @@ import {
   Pressable,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { ensureUserRowSynced } from '@/lib/api';
 import { Colors } from '@/constants/colors';
 import { Fonts } from '@/constants/fonts';
 import LogoMark from '@/components/LogoMark';
+import ReidPulse from '@/components/ReidPulse';
 import { reidErrorFor } from '@/lib/auth-errors';
 
 type Mode = 'signin' | 'signup';
@@ -52,46 +53,56 @@ export default function LoginScreen() {
     setSubmitting(true);
     setErrorMsg(null);
 
-    if (mode === 'signin') {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: e,
-        password: p,
-      });
-      if (error) {
-        setSubmitting(false);
-        setErrorMsg(reidErrorFor(error.message));
-        return;
+    try {
+      if (mode === 'signin') {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: e,
+          password: p,
+        });
+        if (error) {
+          setSubmitting(false);
+          setErrorMsg(reidErrorFor(error.message));
+          return;
+        }
+      } else {
+        const { data, error } = await supabase.auth.signUp({
+          email: e,
+          password: p,
+        });
+        if (error) {
+          setSubmitting(false);
+          setErrorMsg(reidErrorFor(error.message));
+          return;
+        }
+        if (!data.session) {
+          // Supabase project has email confirmation enabled.
+          setSubmitting(false);
+          setErrorMsg('Check your inbox to confirm your account first.');
+          return;
+        }
       }
+
       // Wait for session to persist to AsyncStorage
       await new Promise((resolve) => setTimeout(resolve, 500));
-      const { data: { session } } = await supabase.auth.getSession();
-      console.log('[login] session after wait:', session?.access_token ? 'present' : 'MISSING');
+
+      // Ensure the public.users row exists. The DB has a trigger that creates
+      // it on auth.users insert, but it can race with the first client query
+      // and RLS blocks client-side inserts — so we go through the web app's
+      // admin-backed /api/auth/sync endpoint.
+      const synced = await ensureUserRowSynced();
+      if (!synced) {
+        setSubmitting(false);
+        setErrorMsg("Couldn't set up your account. Try again.");
+        return;
+      }
+
       setSubmitting(false);
       router.replace('/');
-      return;
-    }
-
-    const { data, error } = await supabase.auth.signUp({
-      email: e,
-      password: p,
-    });
-    if (error) {
+    } catch (err) {
+      console.error('[login] submit failed:', err);
       setSubmitting(false);
-      setErrorMsg(reidErrorFor(error.message));
-      return;
+      setErrorMsg("Couldn't sign in. Try again.");
     }
-    if (!data.session) {
-      // Supabase project has email confirmation enabled.
-      setSubmitting(false);
-      setErrorMsg('Check your inbox to confirm your account first.');
-      return;
-    }
-    // Wait for session to persist to AsyncStorage
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const { data: { session } } = await supabase.auth.getSession();
-    console.log('[login] session after wait:', session?.access_token ? 'present' : 'MISSING');
-    setSubmitting(false);
-    router.replace('/');
   }
 
   function toggleMode() {
@@ -125,7 +136,7 @@ export default function LoginScreen() {
           justifyContent: 'center',
         }}
       >
-        <ActivityIndicator color={Colors.accent} />
+        <ReidPulse size={48} />
       </View>
     );
   }

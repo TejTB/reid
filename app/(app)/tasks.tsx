@@ -4,30 +4,31 @@ import {
   Text,
   ScrollView,
   Pressable,
-  ActivityIndicator,
   RefreshControl,
 } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
+  withSpring,
+  FadeInUp,
   Easing,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Check, CheckCircle } from 'lucide-react-native';
+import { format } from 'date-fns';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '@/lib/supabase';
 import { reidFetch } from '@/lib/api';
 import { C, F, R, S } from '@/constants/theme';
-
-const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+import ReidPulse from '@/components/ReidPulse';
 
 function formatAssignedDate(iso: string | null | undefined): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return `${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}`;
+  return format(d, 'MMM d');
 }
 
 type Task = {
@@ -101,7 +102,6 @@ export default function TasksScreen() {
     const wasDone = !!task.completedAt;
     const next = !wasDone;
     setPending((p) => ({ ...p, [task.id]: true }));
-    // Optimistic
     setTasks((prev) =>
       prev.map((t) =>
         t.id === task.id ? { ...t, completedAt: next ? new Date().toISOString() : null } : t,
@@ -109,15 +109,12 @@ export default function TasksScreen() {
     );
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-      // Only `onboarding` task is wired to a real column right now. Future
-      // tasks would each have their own row.
       if (task.id === 'onboarding') {
         const { error } = await supabase
           .from('users')
           .update({ onboarding_task_completed_at: next ? new Date().toISOString() : null })
           .eq('id', userId);
         if (error) {
-          // Revert
           setTasks((prev) =>
             prev.map((t) =>
               t.id === task.id ? { ...t, completedAt: wasDone ? task.completedAt : null } : t,
@@ -127,25 +124,27 @@ export default function TasksScreen() {
         }
       }
       if (next) {
-        // Tell Reid the task was completed; don't block UI on the response.
-        try {
-          await reidFetch('/api/reid', {
-            method: 'POST',
-            body: JSON.stringify({
-              mode: 'chat',
-              messages: [
-                {
-                  role: 'user',
-                  content: `[system: I completed the task you set: "${task.text}"]`,
-                },
-              ],
-            }),
+        // Fire and forget — surface a toast either way so the user knows
+        // something happened.
+        reidFetch('/api/reid', {
+          method: 'POST',
+          body: JSON.stringify({
+            mode: 'chat',
+            messages: [
+              {
+                role: 'user',
+                content: `[system: I completed the task you set: "${task.text}"]`,
+              },
+            ],
+          }),
+        })
+          .then(() => {
+            setToast('Reid responded →');
+            setTimeout(() => setToast(null), 4000);
+          })
+          .catch(() => {
+            // Quiet failure — task is still marked done.
           });
-          setToast('Reid responded — Open chat');
-          setTimeout(() => setToast(null), 4500);
-        } catch {
-          // Network errors are non-fatal; the task is already marked done.
-        }
       }
     } finally {
       setPending((p) => {
@@ -161,50 +160,62 @@ export default function TasksScreen() {
       <View
         style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' }}
       >
-        <ActivityIndicator color={C.red} />
+        <ReidPulse size={48} />
       </View>
     );
   }
 
   const active = tasks.filter((t) => !t.completedAt);
   const done = tasks.filter((t) => t.completedAt);
+  const total = tasks.length;
+  const doneCount = done.length;
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: insets.top + 16, paddingBottom: 60 }}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: insets.top + 16, paddingBottom: 80 }}
+        contentInsetAdjustmentBehavior="never"
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.red} />
         }
       >
-        <Text
+        <View
           style={{
-            fontFamily: F.serifReg,
-            color: C.text,
-            fontSize: 28,
-            letterSpacing: -0.6,
-            lineHeight: 34,
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'flex-end',
           }}
         >
-          Tasks
-        </Text>
-        <Text style={{ fontFamily: F.sans, color: C.muted, fontSize: 14, marginTop: 6 }}>
-          What Reid has asked you to do.
-        </Text>
-        {tasks.length > 0 && (
-          <Text
-            style={{
-              fontFamily: F.sans,
-              color: C.muted,
-              fontSize: 12,
-              marginTop: 12,
-              textAlign: 'right',
-            }}
-          >
-            {tasks.length} task{tasks.length === 1 ? '' : 's'} · {done.length} done
-          </Text>
-        )}
+          <View style={{ flex: 1 }}>
+            <Text
+              style={{
+                fontFamily: F.serifReg,
+                color: C.text,
+                fontSize: 28,
+                letterSpacing: -0.5,
+                lineHeight: 34,
+              }}
+            >
+              Tasks
+            </Text>
+            <Text style={{ fontFamily: F.sans, color: C.muted, fontSize: 14, marginTop: 6 }}>
+              What Reid has asked you to do.
+            </Text>
+          </View>
+          {total > 0 && (
+            <Text
+              style={{
+                fontFamily: F.sans,
+                color: C.muted,
+                fontSize: 12,
+                marginLeft: 12,
+              }}
+            >
+              {total} {total === 1 ? 'task' : 'tasks'} · {doneCount} done
+            </Text>
+          )}
+        </View>
 
         <View style={{ marginTop: S.lg }}>
           {tasks.length === 0 ? (
@@ -238,12 +249,13 @@ export default function TasksScreen() {
             <>
               {active.length > 0 && (
                 <View style={{ gap: 12 }}>
-                  {active.map((t) => (
+                  {active.map((t, i) => (
                     <TaskCard
                       key={t.id}
                       task={t}
                       onToggle={() => toggle(t)}
                       disabled={!!pending[t.id]}
+                      delay={i * 60}
                     />
                   ))}
                 </View>
@@ -255,19 +267,21 @@ export default function TasksScreen() {
                       fontFamily: F.sansMed,
                       fontSize: 11,
                       color: C.muted,
-                      letterSpacing: 1.3,
+                      letterSpacing: 0.88,
                       marginBottom: 12,
+                      textTransform: 'uppercase',
                     }}
                   >
                     DONE
                   </Text>
                   <View style={{ gap: 10 }}>
-                    {done.map((t) => (
+                    {done.map((t, i) => (
                       <TaskCard
                         key={t.id}
                         task={t}
                         onToggle={() => toggle(t)}
-                        disabled={!!pending[t.id]}
+                        disabled
+                        delay={i * 40}
                       />
                     ))}
                   </View>
@@ -277,29 +291,122 @@ export default function TasksScreen() {
           )}
         </View>
       </ScrollView>
-      {toast && (
-        <Pressable
-          onPress={() => {
-            setToast(null);
-            router.push('/(app)/chat');
-          }}
-          style={{
-            position: 'absolute',
-            bottom: 24,
-            left: 20,
-            right: 20,
-            backgroundColor: C.surfaceRaised,
-            borderRadius: R.md,
-            borderWidth: 1,
-            borderColor: C.borderActive,
-            paddingHorizontal: 16,
-            paddingVertical: 14,
-          }}
-        >
-          <Text style={{ fontFamily: F.sansMed, fontSize: 14, color: C.text }}>{toast}</Text>
-        </Pressable>
-      )}
+      <Toast text={toast} onPress={() => router.push('/(app)/chat')} />
     </View>
+  );
+}
+
+function Toast({ text, onPress }: { text: string | null; onPress: () => void }) {
+  const translate = useSharedValue(80);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    if (text) {
+      translate.value = withSpring(0, { damping: 16, stiffness: 180 });
+      opacity.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.cubic) });
+    } else {
+      translate.value = withTiming(80, { duration: 220, easing: Easing.in(Easing.cubic) });
+      opacity.value = withTiming(0, { duration: 200 });
+    }
+  }, [text, translate, opacity]);
+
+  const style = useAnimatedStyle(() => ({
+    transform: [{ translateY: translate.value }],
+    opacity: opacity.value,
+  }));
+
+  // Render whenever text exists OR has just cleared (so the slide-out plays).
+  // We hold the last text in state so the animation can finish on its way out.
+  const [latest, setLatest] = useState<string | null>(text);
+  useEffect(() => {
+    if (text) setLatest(text);
+    else {
+      const t = setTimeout(() => setLatest(null), 260);
+      return () => clearTimeout(t);
+    }
+  }, [text]);
+
+  if (!latest) return null;
+
+  return (
+    <Animated.View
+      pointerEvents={text ? 'auto' : 'none'}
+      style={[
+        {
+          position: 'absolute',
+          bottom: 24,
+          left: 20,
+          right: 20,
+        },
+        style,
+      ]}
+    >
+      <Pressable
+        onPress={onPress}
+        style={{
+          backgroundColor: C.surfaceRaised,
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: C.borderActive,
+          paddingHorizontal: 16,
+          paddingVertical: 14,
+        }}
+      >
+        <Text style={{ fontFamily: F.sansMed, fontSize: 14, color: C.text }}>{latest}</Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+function TaskCheckbox({
+  done,
+  disabled,
+  onPress,
+}: {
+  done: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  const scale = useSharedValue(1);
+  const fill = useSharedValue(done ? 1 : 0);
+
+  useEffect(() => {
+    fill.value = withTiming(done ? 1 : 0, {
+      duration: 300,
+      easing: Easing.out(Easing.cubic),
+    });
+    if (done) {
+      scale.value = withSpring(1.12, { damping: 8 }, () => {
+        scale.value = withSpring(1, { damping: 10 });
+      });
+    }
+  }, [done, fill, scale]);
+
+  const style = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+    backgroundColor: fill.value > 0.5 ? C.red : 'transparent',
+    borderColor: fill.value > 0.5 ? C.red : 'rgba(255,255,255,0.20)',
+  }));
+
+  return (
+    <Pressable onPress={onPress} disabled={disabled} hitSlop={10}>
+      <Animated.View
+        style={[
+          {
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            borderWidth: 2,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: disabled ? 0.6 : 1,
+          },
+          style,
+        ]}
+      >
+        {done && <Check size={16} color="#FFFFFF" strokeWidth={2.6} />}
+      </Animated.View>
+    </Pressable>
   );
 }
 
@@ -307,63 +414,37 @@ function TaskCard({
   task,
   onToggle,
   disabled,
+  delay = 0,
 }: {
   task: Task;
   onToggle: () => void;
   disabled: boolean;
+  delay?: number;
 }) {
   const done = !!task.completedAt;
-  const opacity = useSharedValue(done ? 0.5 : 1);
-
-  useEffect(() => {
-    opacity.value = withTiming(done ? 0.5 : 1, {
-      duration: 200,
-      easing: Easing.out(Easing.quad),
-    });
-  }, [done, opacity]);
-
-  const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
 
   return (
     <Animated.View
-      style={[
-        {
-          flexDirection: 'row',
-          backgroundColor: C.surface,
-          borderWidth: 1,
-          borderColor: C.border,
-          borderRadius: R.md,
-          paddingVertical: 18,
-          paddingHorizontal: 18,
-          gap: 14,
-        },
-        style,
-      ]}
+      entering={FadeInUp.duration(360).delay(delay)}
+      style={{
+        flexDirection: 'row',
+        backgroundColor: C.surfaceGlass,
+        borderWidth: 1,
+        borderColor: C.border,
+        borderRadius: 12,
+        paddingVertical: 18,
+        paddingHorizontal: 18,
+        gap: 16,
+        opacity: done ? 0.5 : 1,
+      }}
     >
-      <Pressable
-        onPress={onToggle}
-        disabled={disabled}
-        hitSlop={10}
-        style={{
-          width: 26,
-          height: 26,
-          borderRadius: 13,
-          borderWidth: done ? 0 : 1.5,
-          borderColor: C.borderActive,
-          backgroundColor: done ? C.red : 'transparent',
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginTop: 2,
-        }}
-      >
-        {done && <Check size={14} color={C.text} strokeWidth={2.5} />}
-      </Pressable>
+      <TaskCheckbox done={done} disabled={disabled} onPress={onToggle} />
       <View style={{ flex: 1 }}>
         <Text
           style={{
             fontFamily: F.sans,
             fontSize: 15,
-            lineHeight: 23,
+            lineHeight: 22,
             color: done ? C.muted : C.text,
             textDecorationLine: done ? 'line-through' : 'none',
           }}
@@ -386,3 +467,7 @@ function TaskCard({
     </Animated.View>
   );
 }
+
+// Keep `R` import live so future task layouts using the new bubble/button radii
+// continue without re-import churn.
+void R;

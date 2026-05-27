@@ -6,19 +6,12 @@ const BASE = process.env.EXPO_PUBLIC_API_URL!;
 async function getAccessToken(): Promise<string | null> {
   // Try in-memory session first
   const { data: { session } } = await supabase.auth.getSession();
-  if (session?.access_token) {
-    console.log('[reidFetch] token from getSession');
-    return session.access_token;
-  }
+  if (session?.access_token) return session.access_token;
 
   // Force refresh from storage
   const { data: { session: refreshed } } = await supabase.auth.refreshSession();
-  if (refreshed?.access_token) {
-    console.log('[reidFetch] token from refreshSession');
-    return refreshed.access_token;
-  }
+  if (refreshed?.access_token) return refreshed.access_token;
 
-  console.log('[reidFetch] no token found');
   return null;
 }
 
@@ -36,4 +29,25 @@ export async function reidFetch(path: string, options: RequestInit = {}): Promis
       ...(options.headers ?? {}),
     },
   });
+}
+
+// Asks the web app's admin-backed sync endpoint to ensure a public.users
+// row exists for the current auth user. Safe to call repeatedly: the server
+// is idempotent. Returns true on success.
+export async function ensureUserRowSynced(): Promise<boolean> {
+  const token = await getAccessToken();
+  if (!token) return false;
+  try {
+    const res = await fetch(`${BASE}/api/auth/sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('[ensureUserRowSynced] failed:', err);
+    return false;
+  }
 }

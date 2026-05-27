@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { supabase } from '@/lib/supabase';
 import { Colors } from '@/constants/colors';
 import { Fonts } from '@/constants/fonts';
 import LogoMark from '@/components/LogoMark';
@@ -33,13 +32,6 @@ export default function OnboardingIntro() {
     router.push('/onboarding/chat');
   }
 
-  // DEV ONLY — wipe the current session and bounce to /login. Remove once
-  // auth flows are stable.
-  async function handleReset() {
-    await supabase.auth.signOut();
-    router.replace('/login');
-  }
-
   return (
     <View
       style={{
@@ -52,28 +44,6 @@ export default function OnboardingIntro() {
         paddingBottom: insets.bottom + 32,
       }}
     >
-      {/* DEV ONLY — testing tool to wipe session. Remove once stable. */}
-      <Pressable
-        onPress={handleReset}
-        hitSlop={12}
-        style={{
-          position: 'absolute',
-          top: insets.top + 12,
-          right: 16,
-          zIndex: 10,
-        }}
-      >
-        <Text
-          style={{
-            fontFamily: Fonts.sansRegular,
-            fontSize: 12,
-            color: Colors.textDim,
-            textDecorationLine: 'underline',
-          }}
-        >
-          Reset
-        </Text>
-      </Pressable>
       <View style={{ width: '100%', maxWidth: 360, alignItems: 'center' }}>
         <LogoMark size={48} />
 
@@ -91,27 +61,41 @@ export default function OnboardingIntro() {
           Reid
         </Text>
 
-        <View style={{ width: '100%', alignItems: 'center', marginTop: 28, gap: 22 }}>
+        <View style={{ width: '100%', alignItems: 'center', marginTop: 28, gap: 12 }}>
           <Text
             style={{
-              fontFamily: Fonts.serifItalic,
+              fontFamily: Fonts.serifRegular,
               color: Colors.textPrimary,
-              fontSize: 20,
-              lineHeight: 30,
+              fontSize: 34,
+              lineHeight: 40,
+              letterSpacing: -0.5,
               textAlign: 'center',
               maxWidth: 320,
             }}
           >
-            I{"’"}m Reid. I help founders cut the noise.
+            Your co-founder. Always on.
           </Text>
 
-          <Animated.View style={{ opacity: fade, marginTop: 6 }}>
+          <Text
+            style={{
+              fontFamily: Fonts.serifItalic,
+              color: Colors.textDim,
+              fontSize: 16,
+              lineHeight: 22,
+              textAlign: 'center',
+              marginTop: 12,
+            }}
+          >
+            I{"’"}ve been waiting.
+          </Text>
+
+          <Animated.View style={{ opacity: fade, marginTop: 22, width: '100%' }}>
             <Pressable
               onPress={handleBegin}
               disabled={!revealed || pressed}
               style={{
                 height: 46,
-                minWidth: 180,
+                width: '100%',
                 borderRadius: 9,
                 backgroundColor: Colors.accent,
                 alignItems: 'center',

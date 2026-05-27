@@ -7,7 +7,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -16,6 +15,7 @@ import { supabase } from '@/lib/supabase';
 import { Colors } from '@/constants/colors';
 import { Fonts } from '@/constants/fonts';
 import LogoMark from '@/components/LogoMark';
+import ReidPulse from '@/components/ReidPulse';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
@@ -156,7 +156,7 @@ export default function OnboardingChat() {
           We{"’"}re ready.
         </Text>
         <View style={{ marginTop: 18 }}>
-          <ActivityIndicator color={Colors.accent} />
+          <ReidPulse size={40} />
         </View>
       </View>
     );
