@@ -32,7 +32,6 @@ export default function ReidOrb({ state, amplitude, onPress }: Props) {
     cancelAnimation(breath);
     cancelAnimation(contract);
     if (state === "idle") {
-      breath.value = 0;
       breath.value = withRepeat(
         withSequence(
           withTiming(1, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
@@ -120,6 +119,8 @@ export default function ReidOrb({ state, amplitude, onPress }: Props) {
       hitSlop={24}
       style={{ alignItems: "center", justifyContent: "center", width: BASE * 1.8, height: BASE * 1.8 }}
     >
+      {/* Back-to-front stack: ring2 (outer) → ring1 → glow → core (front).
+          Order matters — later siblings paint on top in React Native. */}
       <Animated.View style={[ring(1.0), ring2Style]} />
       <Animated.View style={[ring(1.0), ring1Style]} />
       <Animated.View
