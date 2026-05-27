@@ -21,10 +21,11 @@ export async function reidFetch(path: string, options: RequestInit = {}): Promis
     router.replace('/login');
     throw new Error('Not signed in');
   }
+  const isForm = typeof FormData !== "undefined" && options.body instanceof FormData;
   return fetch(`${BASE}${path}`, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
+      ...(isForm ? {} : { "Content-Type": "application/json" }),
       Authorization: `Bearer ${token}`,
       ...(options.headers ?? {}),
     },
