@@ -18,11 +18,13 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { format } from 'date-fns';
-import { Check } from 'lucide-react-native';
+import { Check, Settings } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '@/lib/supabase';
 import { reidFetch } from '@/lib/api';
 import ReidPulse from '@/components/ReidPulse';
+import GlowCard from '@/components/GlowCard';
+import PicksCarousel from '@/components/PicksCarousel';
 import { registerPushToken } from '@/lib/notifications';
 import { C, F, R } from '@/constants/theme';
 
@@ -46,6 +48,19 @@ type Observation = {
   id: string;
   text: string;
   created_at: string;
+};
+
+type PrimaryGoal = {
+  id: string;
+  title: string;
+  generated_take: string | null;
+};
+
+type LastSession = {
+  title: string | null;
+  reid_note: string | null;
+  mood: string | null;
+  ended_at: string | null;
 };
 
 // Free plan caps at 3 sessions — surfaces the progress bar status in the
@@ -100,7 +115,7 @@ function dimForStatus(status: Status): string {
     case 'critical':
       return C.redDim;
     default:
-      return 'rgba(255,255,255,0.04)';
+      return C.surfaceGlass;
   }
 }
 
@@ -119,6 +134,9 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [observation, setObservation] = useState<Observation | null>(null);
+  const [primaryGoal, setPrimaryGoal] = useState<PrimaryGoal | null>(null);
+  const [lastSession, setLastSession] = useState<LastSession | null>(null);
+  const [sessionsThisWeek, setSessionsThisWeek] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -168,6 +186,36 @@ export default function HomeScreen() {
         .maybeSingle();
       if (!mountedRef.current) return;
       setObservation((obsRow as Observation | null) ?? null);
+
+      // Current focus (primary goal), last completed session, and a real
+      // sessions-this-week count. All non-fatal — Home renders without them.
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const [goalRes, sessRes, weekRes] = await Promise.all([
+        supabase
+          .from('goals')
+          .select('id, title, generated_take')
+          .eq('user_id', row.id)
+          .eq('is_primary', true)
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from('sessions')
+          .select('title, reid_note, mood, ended_at')
+          .eq('user_id', row.id)
+          .not('ended_at', 'is', null)
+          .order('ended_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from('sessions')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', row.id)
+          .gte('started_at', weekAgo),
+      ]);
+      if (!mountedRef.current) return;
+      setPrimaryGoal((goalRes.data as PrimaryGoal | null) ?? null);
+      setLastSession((sessRes.data as LastSession | null) ?? null);
+      setSessionsThisWeek(weekRes.count ?? 0);
     } catch {
       if (mountedRef.current) setError(true);
     } finally {
@@ -282,9 +330,9 @@ export default function HomeScreen() {
   const progressPct = Math.min(100, (sessionCount / FREE_SESSION_LIMIT) * 100);
   const tasksDone = tasksDoneCount(profile);
   const daysActive = activeDaysCount(profile);
-  // Sessions this week is approximated by streak_days capped at 7 — a real
-  // weekly view would need a sessions table query. Marked TODO below.
-  const sessionsThisWeek = Math.min(sessionCount, 7);
+  // Current focus: the primary goal if set, else the onboarding summary.
+  const focusText = primaryGoal?.title?.trim() || summary;
+  const focusTake = primaryGoal?.generated_take?.trim() ?? '';
 
   async function toggleTask() {
     if (!profile || taskPending) return;
@@ -336,27 +384,34 @@ export default function HomeScreen() {
       }
     >
       {/* HEADER */}
-      <Text
-        style={{
-          fontFamily: F.serifReg,
-          color: C.text,
-          fontSize: 28,
-          letterSpacing: -0.5,
-          lineHeight: 34,
-        }}
-      >
-        {greeting()}{greetName ? `, ${greetName}` : ''}.
-      </Text>
-      <Text
-        style={{
-          fontFamily: F.sans,
-          color: C.muted,
-          fontSize: 13,
-          marginTop: 4,
-        }}
-      >
-        {format(new Date(), 'EEEE, MMMM d')}
-      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <View style={{ flex: 1 }}>
+          <Text
+            style={{
+              fontFamily: F.serifReg,
+              color: C.text,
+              fontSize: 28,
+              letterSpacing: -0.5,
+              lineHeight: 34,
+            }}
+          >
+            {greeting()}{greetName ? `, ${greetName}` : ''}.
+          </Text>
+          <Text
+            style={{
+              fontFamily: F.sans,
+              color: C.muted,
+              fontSize: 13,
+              marginTop: 4,
+            }}
+          >
+            {format(new Date(), 'EEEE, MMMM d')}
+          </Text>
+        </View>
+        <Pressable onPress={() => router.push('/(app)/plan')} hitSlop={12} style={{ paddingTop: 4 }}>
+          <Settings size={22} color={C.textDim} />
+        </Pressable>
+      </View>
 
       {/* MOMENTUM STRIP */}
       <View style={{ marginTop: 20, marginHorizontal: -20 }}>
@@ -384,18 +439,25 @@ export default function HomeScreen() {
       <View style={{ marginTop: 20, gap: 12 }}>
         {/* YOUR FOCUS */}
         <CardShell delay={0}>
-          <CardLabel text="YOUR FOCUS" color={statusColor} />
-          {summary ? (
-            <Text
-              style={{
-                fontFamily: F.serifItalic,
-                color: C.text,
-                fontSize: 17,
-                lineHeight: 24,
-              }}
-            >
-              {summary}
-            </Text>
+          <CardLabel text="CURRENT FOCUS" color={statusColor} />
+          {focusText ? (
+            <>
+              <Text
+                style={{
+                  fontFamily: F.serifItalic,
+                  color: C.text,
+                  fontSize: 17,
+                  lineHeight: 24,
+                }}
+              >
+                {focusText}
+              </Text>
+              {focusTake ? (
+                <Text style={{ fontFamily: F.sans, color: C.muted, fontSize: 13, lineHeight: 20, marginTop: 8 }}>
+                  {focusTake}
+                </Text>
+              ) : null}
+            </>
           ) : (
             <Text style={{ fontFamily: F.sans, color: C.muted, fontSize: 14, lineHeight: 22 }}>
               Open a session — Reid will set the focus.
@@ -503,8 +565,27 @@ export default function HomeScreen() {
           )}
         </CardShell>
 
+        {/* REID'S BEEN THINKING — last-session nudge (Sessions list is Sprint 5) */}
+        {lastSession && (lastSession.reid_note || lastSession.title) ? (
+          <GlowCard delay={150} glow onPress={() => router.push('/(app)/reid')}>
+            <CardLabel text="REID'S BEEN THINKING ABOUT…" color={C.muted} />
+            <Text style={{ fontFamily: F.serifItalic, color: C.text, fontSize: 16, lineHeight: 24 }}>
+              {lastSession.reid_note?.trim() || lastSession.title?.trim()}
+            </Text>
+            <Text style={{ fontFamily: F.sans, color: C.textDim, fontSize: 12, marginTop: 10 }}>
+              Pick up where you left off →
+            </Text>
+          </GlowCard>
+        ) : null}
+
         {/* CONTINUE button */}
         <ContinueButton onPress={() => router.push('/(app)/reid')} delay={180} />
+      </View>
+
+      {/* REID'S PICKS */}
+      <View style={{ marginTop: 28 }}>
+        <CardLabel text="REID'S PICKS" color={C.muted} />
+        <PicksCarousel delay={200} />
       </View>
 
       {/* Avoid an unused-var lint if authId isn't read elsewhere. */}

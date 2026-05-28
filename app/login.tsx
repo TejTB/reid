@@ -13,6 +13,7 @@ import { supabase } from '@/lib/supabase';
 import { ensureUserRowSynced } from '@/lib/api';
 import { Colors } from '@/constants/colors';
 import { Fonts } from '@/constants/fonts';
+import { C } from '@/constants/theme';
 import LogoMark from '@/components/LogoMark';
 import ReidPulse from '@/components/ReidPulse';
 import { reidErrorFor } from '@/lib/auth-errors';
@@ -221,7 +222,7 @@ export default function LoginScreen() {
                 borderWidth: 1,
                 borderColor: emailFocused
                   ? Colors.accent
-                  : 'rgba(122,144,168,0.25)',
+                  : C.inputBorder,
                 width: '100%',
               }}
             />
@@ -256,7 +257,7 @@ export default function LoginScreen() {
                 borderWidth: 1,
                 borderColor: passwordFocused
                   ? Colors.accent
-                  : 'rgba(122,144,168,0.25)',
+                  : C.inputBorder,
                 width: '100%',
               }}
             />

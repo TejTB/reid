@@ -219,6 +219,9 @@ export function useVoiceSession(opts: VoiceSessionOptions = {}) {
     busyRef.current = true;
     try {
       dispatch({ type: "OPENING" });
+      // Speak-first never records, so set the playback audio mode here
+      // (startSession does this for the record-first path).
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
       const out = await streamReid();
       if (!out) { dispatch({ type: "ERROR" }); return; }
       convo.append({ role: "assistant", content: out.reply });

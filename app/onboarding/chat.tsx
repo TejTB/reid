@@ -14,6 +14,7 @@ import { reidFetch } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/constants/colors';
 import { Fonts } from '@/constants/fonts';
+import { C } from '@/constants/theme';
 import LogoMark from '@/components/LogoMark';
 import ReidPulse from '@/components/ReidPulse';
 
@@ -225,7 +226,7 @@ export default function OnboardingChat() {
                     fontFamily: Fonts.sansRegular,
                     fontSize: 15,
                     lineHeight: 22,
-                    color: '#C8D5E3',
+                    color: C.muted,
                   }}
                 >
                   {item.content}
@@ -265,7 +266,7 @@ export default function OnboardingChat() {
             paddingVertical: 10,
             borderRadius: 12,
             borderWidth: 1,
-            borderColor: 'rgba(122,144,168,0.25)',
+            borderColor: C.inputBorder,
             backgroundColor: 'transparent',
           }}
         />

@@ -29,7 +29,9 @@ export default function OnboardingIntro() {
   function handleBegin() {
     if (pressed) return;
     setPressed(true);
-    router.push('/onboarding/chat');
+    // Voice-first: Reid's first contact is spoken. The Begin tap is the user
+    // gesture that anchors audio playback. Text onboarding is the fallback.
+    router.push('/onboarding/voice');
   }
 
   return (
