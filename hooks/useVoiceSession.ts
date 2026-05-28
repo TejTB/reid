@@ -17,7 +17,8 @@ import { voiceReducer, type VoiceState, type VoiceEvent } from "@/lib/voice/mach
 import { meterToAmplitude } from "@/lib/voice/amplitude";
 import { shouldAutoStop } from "@/lib/voice/silence";
 import { voiceGateDecision } from "@/lib/voice/gating";
-import { stripReidStream } from "@/lib/voice/strip";
+import { stripReidStream, splitOnboardingComplete } from "@/lib/voice/strip";
+import { speechEnvelope } from "@/lib/voice/envelope";
 
 const SILENCE_DB = -40;
 const SILENCE_MS = 1500;
@@ -33,7 +34,21 @@ function bytesToBase64(bytes: Uint8Array): string {
   return typeof globalThis.btoa === "function" ? globalThis.btoa(bin) : "";
 }
 
-export function useVoiceSession() {
+export type VoiceSessionOptions = {
+  /** Conversation mode sent to /api/reid. Default "chat". */
+  mode?: "chat" | "onboarding";
+  /** Whether to enforce the voice entitlement gate. Default true. Onboarding
+   *  passes false (first contact is always free). */
+  gate?: boolean;
+  /** Fired after playback finishes for the turn that completed onboarding
+   *  (server `[ONBOARDING_COMPLETE]` sentinel or DB flag). */
+  onComplete?: () => void;
+};
+
+export function useVoiceSession(opts: VoiceSessionOptions = {}) {
+  const mode = opts.mode ?? "chat";
+  const gate = opts.gate ?? true;
+
   const [state, dispatch] = useReducer(
     (s: VoiceState, e: VoiceEvent) => voiceReducer(s, e),
     "idle",
@@ -57,8 +72,12 @@ export function useVoiceSession() {
   const subRef = useRef<{ remove: () => void } | null>(null);
   const hadExchangeRef = useRef(false);
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const completeRef = useRef(false);
+  const onCompleteRef = useRef(opts.onComplete);
+  onCompleteRef.current = opts.onComplete;
 
   const refreshEntitlement = useCallback(async () => {
+    if (!gate) { setVoiceBlocked(false); return; }
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
     const { data: row } = await supabase
@@ -69,7 +88,7 @@ export function useVoiceSession() {
     if (current) q = q.neq("id", current);
     const { count } = await q;
     setVoiceBlocked(!voiceGateDecision({ isPro, priorVoiceSessions: count ?? 0 }).allowed);
-  }, []);
+  }, [gate]);
 
   useEffect(() => { void refreshEntitlement(); }, [refreshEntitlement]);
 
@@ -128,6 +147,47 @@ export function useVoiceSession() {
     }
   }, [recorder, voiceBlocked]);
 
+  // Shared: POST the current conversation to /api/reid, stream the reply,
+  // strip control markers + the onboarding sentinel. Used by both the
+  // record-first turn (runTurn) and the speak-first opening (kickoff).
+  async function streamReid(): Promise<{ reply: string; complete: boolean } | null> {
+    const rRes = await reidFetch("/api/reid", {
+      method: "POST",
+      body: JSON.stringify({ mode, voice: true, sessionId: convo.getSnapshot().sessionId, messages: convo.getSnapshot().messages }),
+    });
+    if (!rRes.ok) return null;
+    const sid = rRes.headers.get("X-Reid-Session-Id") ?? rRes.headers.get("x-reid-session-id");
+    if (sid) convo.setSessionId(sid);
+    let acc = "";
+    const body = rRes.body as ReadableStream<Uint8Array> | null | undefined;
+    if (body && typeof body.getReader === "function") {
+      const reader = body.getReader();
+      const dec = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) { acc += dec.decode(value, { stream: true }); setReidResponse(splitOnboardingComplete(stripReidStream(acc)).body); }
+      }
+    } else {
+      acc = await rRes.text();
+      setReidResponse(splitOnboardingComplete(stripReidStream(acc)).body);
+    }
+    const split = splitOnboardingComplete(stripReidStream(acc));
+    let complete = split.complete;
+    // Fallback: onboarding may set the DB flag without emitting the sentinel.
+    if (mode === "onboarding" && !complete) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const { data: u } = await supabase
+            .from("users").select("onboarding_complete").eq("auth_id", session.user.id).maybeSingle();
+          if (u?.onboarding_complete) complete = true;
+        }
+      } catch {}
+    }
+    return { reply: split.body.trim(), complete };
+  }
+
   async function runTurn(uri: string) {
     const form = new FormData();
     form.append("file", { uri, name: "speech.m4a", type: "audio/m4a" } as unknown as Blob);
@@ -142,34 +202,35 @@ export function useVoiceSession() {
     setTranscript(text);
     convo.append({ role: "user", content: text });
 
-    const rRes = await reidFetch("/api/reid", {
-      method: "POST",
-      body: JSON.stringify({ mode: "chat", voice: true, sessionId: convo.getSnapshot().sessionId, messages: convo.getSnapshot().messages }),
-    });
-    if (!rRes.ok) { dispatch({ type: "ERROR" }); convo.dropLast(); return; }
-    const sid = rRes.headers.get("X-Reid-Session-Id") ?? rRes.headers.get("x-reid-session-id");
-    if (sid) convo.setSessionId(sid);
-    let acc = "";
-    const body = rRes.body as ReadableStream<Uint8Array> | null | undefined;
-    if (body && typeof body.getReader === "function") {
-      const reader = body.getReader();
-      const dec = new TextDecoder();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) { acc += dec.decode(value, { stream: true }); setReidResponse(stripReidStream(acc)); }
-      }
-    } else {
-      acc = await rRes.text();
-      setReidResponse(stripReidStream(acc));
-    }
-    const reply = stripReidStream(acc).trim();
-    convo.append({ role: "assistant", content: reply });
+    const out = await streamReid();
+    if (!out) { dispatch({ type: "ERROR" }); convo.dropLast(); return; }
+    convo.append({ role: "assistant", content: out.reply });
     hadExchangeRef.current = true;
+    if (out.complete) completeRef.current = true;
 
     dispatch({ type: "REPLY_READY" });
-    await playReply(reply);
+    await playReply(out.reply);
   }
+
+  // Speak-first opening: Reid talks before the user records (onboarding /
+  // first contact). idle → processing (OPENING) → playing.
+  const kickoff = useCallback(async () => {
+    if (stateRef.current !== "idle" || busyRef.current) return;
+    busyRef.current = true;
+    try {
+      dispatch({ type: "OPENING" });
+      const out = await streamReid();
+      if (!out) { dispatch({ type: "ERROR" }); return; }
+      convo.append({ role: "assistant", content: out.reply });
+      hadExchangeRef.current = true;
+      if (out.complete) completeRef.current = true;
+      dispatch({ type: "REPLY_READY" });
+      await playReply(out.reply);
+    } finally {
+      busyRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function playReply(text: string) {
     try {
@@ -198,11 +259,16 @@ export function useVoiceSession() {
         subRef.current = null;
         if (playerRef.current === player) { player.remove(); playerRef.current = null; }
         dispatch({ type: "PLAYBACK_DONE" });
+        // Fire the onboarding-complete callback only after Reid finishes
+        // speaking the completing turn, so navigation never clips the audio.
+        if (completeRef.current) { completeRef.current = false; onCompleteRef.current?.(); }
       };
 
       // (b) CONFIRMED via context7: AudioEvents has "playbackStatusUpdate" with AudioStatus payload.
       // AudioStatus.didJustFinish: boolean — field name confirmed correct.
-      pulseRef.current = setInterval(() => setPlaybackAmplitude(0.3 + 0.5 * Math.random()), 120);
+      // Shaped speech-envelope (not random) drives the SPEAKING orb amplitude.
+      const playStart = Date.now();
+      pulseRef.current = setInterval(() => setPlaybackAmplitude(speechEnvelope(Date.now() - playStart)), 80);
       const sub = player.addListener("playbackStatusUpdate", (s: AudioStatus) => {
         if (s.didJustFinish) finishPlayback();
       });
@@ -232,6 +298,7 @@ export function useVoiceSession() {
     voiceBlocked,
     startSession,
     stopRecording,
+    kickoff,
     refreshEntitlement,
     hadExchangeRef,
   };

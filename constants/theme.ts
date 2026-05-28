@@ -6,14 +6,17 @@
 
 export const C = {
   bg: '#0A1628',
+  bgDeep: '#060E1C',
   surface: '#0F1E35',
   surfaceRaised: '#162236',
   surfaceGlass: 'rgba(255,255,255,0.04)',
-  border: 'rgba(255,255,255,0.07)',
+  border: 'rgba(255,255,255,0.10)',
   borderActive: 'rgba(255,255,255,0.14)',
+  inputBorder: 'rgba(255,255,255,0.10)',
   text: '#F2EDE3',
-  textDim: 'rgba(242,237,227,0.25)',
-  muted: 'rgba(242,237,227,0.45)',
+  // Documented blue-grey ramp: secondary (#C8D5E3) and dim (#7A90A8).
+  textDim: '#7A90A8',
+  muted: '#C8D5E3',
   red: '#B91C1C',
   redDim: 'rgba(185,28,28,0.15)',
   redFocus: 'rgba(185,28,28,0.5)',

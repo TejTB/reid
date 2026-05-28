@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stripReidStream } from "../strip.ts";
+import { stripReidStream, splitOnboardingComplete } from "../strip.ts";
 import { meterToAmplitude } from "../amplitude.ts";
 import { shouldAutoStop } from "../silence.ts";
 import { voiceGateDecision } from "../gating.ts";
@@ -10,6 +10,12 @@ test("stripReidStream cuts at the first record separator", () => {
   assert.equal(stripReidStream("Reply\x1eREID_ACTIONS:[\"x\"]\n"), "Reply");
   assert.equal(stripReidStream("A\x1eB\x1eC"), "A");
   assert.equal(stripReidStream(""), "");
+});
+
+test("splitOnboardingComplete strips the sentinel and flags completion", () => {
+  assert.deepEqual(splitOnboardingComplete("We're ready."), { body: "We're ready.", complete: false });
+  assert.deepEqual(splitOnboardingComplete("Welcome.[ONBOARDING_COMPLETE]"), { body: "Welcome.", complete: true });
+  assert.deepEqual(splitOnboardingComplete("[ONBOARDING_COMPLETE]"), { body: "", complete: true });
 });
 
 test("meterToAmplitude clamps dBFS to 0..1", () => {

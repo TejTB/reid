@@ -3,6 +3,7 @@ export type VoiceState = "idle" | "recording" | "processing" | "playing";
 export type VoiceEvent =
   | { type: "TAP" }
   | { type: "SILENCE" }
+  | { type: "OPENING" }
   | { type: "REPLY_READY" }
   | { type: "PLAYBACK_DONE" }
   | { type: "ERROR" }
@@ -14,7 +15,11 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
   if (event.type === "ERROR" || event.type === "RESET") return "idle";
   switch (state) {
     case "idle":
-      return event.type === "TAP" ? "recording" : "idle";
+      // TAP → user records first. OPENING → Reid speaks first (onboarding /
+      // speak-first), skipping the recording step.
+      if (event.type === "TAP") return "recording";
+      if (event.type === "OPENING") return "processing";
+      return "idle";
     case "recording":
       return event.type === "TAP" || event.type === "SILENCE" ? "processing" : "recording";
     case "processing":
