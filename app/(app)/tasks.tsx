@@ -291,7 +291,7 @@ export default function TasksScreen() {
           )}
         </View>
       </ScrollView>
-      <Toast text={toast} onPress={() => router.push('/(app)/chat')} />
+      <Toast text={toast} onPress={() => router.push('/voice')} />
     </View>
   );
 }

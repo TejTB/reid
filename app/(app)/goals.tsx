@@ -346,7 +346,7 @@ function EmptyBlock() {
         No goals yet. Open a session and tell Reid the number you{"'"}re trying to move.
       </Text>
       <Pressable
-        onPress={() => router.push('/(app)/chat')}
+        onPress={() => router.push('/voice')}
         style={{
           marginTop: 18,
           height: 50,
