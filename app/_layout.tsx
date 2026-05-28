@@ -164,7 +164,6 @@ export default function RootLayout() {
         <Stack.Screen name="onboarding" />
         <Stack.Screen name="(app)" />
         <Stack.Screen name="upgrade" options={{ presentation: 'modal' }} />
-        <Stack.Screen name="voice" options={{ presentation: 'fullScreenModal' }} />
       </Stack>
       {locked && <LockedOverlay onUnlock={tryUnlock} />}
     </SafeAreaProvider>

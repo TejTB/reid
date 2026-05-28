@@ -48,7 +48,7 @@ export default function Index() {
         }
 
         if (user.onboarding_complete) {
-          router.replace('/voice');
+          router.replace('/(app)/reid');
         } else {
           router.replace('/onboarding');
         }

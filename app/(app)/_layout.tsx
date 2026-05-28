@@ -8,20 +8,13 @@ import Animated, {
   withSequence,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  Home,
-  Target,
-  MessageCircle,
-  Eye,
-  LayoutList,
-  CheckSquare,
-} from 'lucide-react-native';
+import { Home, Target, Eye, AudioLines } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { C, F } from '@/constants/theme';
 
 const LAST_SEEN_KEY = 'reid:lastSeenReidMessageAt';
-const INACTIVE_COLOR = 'rgba(242,237,227,0.35)';
+const INACTIVE_COLOR = C.textDim;
 
 // Wraps each icon to:
 //   1. Draw the 2px red rail above when focused
@@ -68,7 +61,7 @@ function ReidIcon({ color, focused, badge }: { color: string; focused: boolean; 
   return (
     <TabIconShell focused={focused}>
       <View>
-        <MessageCircle size={20} color={color} />
+        <AudioLines size={20} color={color} />
         {badge && (
           <View
             style={{
@@ -144,9 +137,10 @@ export default function AppLayout() {
     };
   }, [pathname]);
 
-  // When the user lands on the Reid tab, clear the badge.
+  // When the user lands on the Reid (orb) tab — or the text fallback — clear
+  // the badge.
   useEffect(() => {
-    if (pathname?.endsWith('/chat')) {
+    if (pathname?.endsWith('/reid') || pathname?.endsWith('/chat')) {
       void AsyncStorage.setItem(LAST_SEEN_KEY, new Date().toISOString());
       setUnread(false);
     }
@@ -174,6 +168,16 @@ export default function AppLayout() {
         },
       }}
     >
+      {/* Reid (the orb) is the default landing tab. */}
+      <Tabs.Screen
+        name="reid"
+        options={{
+          title: 'Reid',
+          tabBarIcon: ({ color, focused }) => (
+            <ReidIcon color={color} focused={focused} badge={unread} />
+          ),
+        }}
+      />
       <Tabs.Screen
         name="home"
         options={{
@@ -197,15 +201,6 @@ export default function AppLayout() {
         }}
       />
       <Tabs.Screen
-        name="chat"
-        options={{
-          title: 'Reid',
-          tabBarIcon: ({ color, focused }) => (
-            <ReidIcon color={color} focused={focused} badge={unread} />
-          ),
-        }}
-      />
-      <Tabs.Screen
         name="noticed"
         options={{
           title: 'Noticed',
@@ -216,28 +211,11 @@ export default function AppLayout() {
           ),
         }}
       />
-      <Tabs.Screen
-        name="plan"
-        options={{
-          title: 'Plan',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIconShell focused={focused}>
-              <LayoutList size={20} color={color} />
-            </TabIconShell>
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="tasks"
-        options={{
-          title: 'Tasks',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIconShell focused={focused}>
-              <CheckSquare size={20} color={color} />
-            </TabIconShell>
-          ),
-        }}
-      />
+      {/* Kept as routes, off the tab bar: text chat (the "type instead"
+          fallback), plan/billing (behind the header gear), tasks (from Home). */}
+      <Tabs.Screen name="chat" options={{ href: null }} />
+      <Tabs.Screen name="plan" options={{ href: null }} />
+      <Tabs.Screen name="tasks" options={{ href: null }} />
     </Tabs>
   );
 }

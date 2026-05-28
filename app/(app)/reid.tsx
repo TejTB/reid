@@ -1,10 +1,10 @@
-import { useEffect } from "react";
+import { useCallback } from "react";
 import { View, Text, Pressable } from "react-native";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { StatusBar } from "expo-status-bar";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MessageCircle } from "lucide-react-native";
+import { Settings } from "lucide-react-native";
 import { C, F } from "@/constants/theme";
 import LogoMark from "@/components/LogoMark";
 import ReidOrb from "@/components/ReidOrb";
@@ -13,7 +13,9 @@ import { useOrbState } from "@/hooks/useOrbState";
 import { reidFetch } from "@/lib/api";
 import * as convo from "@/lib/conversationStore";
 
-export default function VoiceScreen() {
+// The orb IS the app: this is the default landing tab. Voice is primary,
+// text chat is the quiet "type instead" fallback.
+export default function ReidScreen() {
   const insets = useSafeAreaInsets();
   const vs = useVoiceSession();
   const orb = useOrbState({
@@ -23,18 +25,22 @@ export default function VoiceScreen() {
   });
 
   const { hadExchangeRef } = vs;
-  // Recap on exit (fire-and-forget) only if a real voice turn happened this visit.
-  useEffect(() => {
-    return () => {
-      const sid = convo.getSnapshot().sessionId;
-      if (sid && hadExchangeRef.current) {
-        void reidFetch("/api/session-recap", {
-          method: "POST",
-          body: JSON.stringify({ session_id: sid }),
-        }).catch(() => {});
-      }
-    };
-  }, [hadExchangeRef]);
+  // Recap on blur (leaving the tab), not on unmount — tabs stay mounted.
+  // Fire-and-forget, only if a real voice turn happened this visit.
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        const sid = convo.getSnapshot().sessionId;
+        if (sid && hadExchangeRef.current) {
+          void reidFetch("/api/session-recap", {
+            method: "POST",
+            body: JSON.stringify({ session_id: sid }),
+          }).catch(() => {});
+          hadExchangeRef.current = false;
+        }
+      };
+    }, [hadExchangeRef]),
+  );
 
   const status =
     vs.voiceBlocked ? "upgrade to continue"
@@ -44,11 +50,11 @@ export default function VoiceScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <StatusBar style="light" hidden />
+      <StatusBar style="light" />
       <View style={{ paddingTop: insets.top + 12, paddingHorizontal: 20, height: 56 + insets.top, flexDirection: "row", alignItems: "center" }}>
         <View style={{ flex: 1 }}><LogoMark size={28} /></View>
-        <Pressable onPress={() => router.replace('/(app)/chat')} hitSlop={16}>
-          <MessageCircle size={24} color={C.muted} />
+        <Pressable onPress={() => router.push("/(app)/plan")} hitSlop={16}>
+          <Settings size={22} color={C.textDim} />
         </Pressable>
       </View>
 
@@ -75,10 +81,15 @@ export default function VoiceScreen() {
         ) : null}
       </View>
 
-      <View style={{ height: 64, alignItems: "center", justifyContent: "center", paddingBottom: insets.bottom }}>
+      <View style={{ height: 72, alignItems: "center", justifyContent: "center", gap: 10, paddingBottom: insets.bottom }}>
         <Pressable disabled={!vs.voiceBlocked} onPress={() => router.push("/upgrade")}>
           <Text style={{ fontFamily: F.sans, fontSize: 12, color: vs.voiceBlocked ? C.red : C.muted, letterSpacing: 0.5 }}>
             {status}
+          </Text>
+        </Pressable>
+        <Pressable onPress={() => router.push("/(app)/chat")} hitSlop={12}>
+          <Text style={{ fontFamily: F.sans, fontSize: 12, color: C.textDim, letterSpacing: 0.5 }}>
+            type instead
           </Text>
         </Pressable>
       </View>

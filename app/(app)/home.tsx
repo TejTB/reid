@@ -504,7 +504,7 @@ export default function HomeScreen() {
         </CardShell>
 
         {/* CONTINUE button */}
-        <ContinueButton onPress={() => router.push('/voice')} delay={180} />
+        <ContinueButton onPress={() => router.push('/(app)/reid')} delay={180} />
       </View>
 
       {/* Avoid an unused-var lint if authId isn't read elsewhere. */}
