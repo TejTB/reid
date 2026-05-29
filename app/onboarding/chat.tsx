@@ -17,6 +17,7 @@ import { Fonts } from '@/constants/fonts';
 import { C } from '@/constants/theme';
 import LogoMark from '@/components/LogoMark';
 import ReidPulse from '@/components/ReidPulse';
+import * as convo from '@/lib/conversationStore';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
@@ -30,7 +31,12 @@ function stripSentinel(text: string): { body: string; hasSentinel: boolean } {
 
 export default function OnboardingChat() {
   const insets = useSafeAreaInsets();
-  const [messages, setMessages] = useState<Msg[]>([]);
+  // Seed from the SHARED conversation. If the user got here via "type instead"
+  // mid-voice-onboarding, this already holds Reid's opener + any answers — so
+  // switching to text CONTINUES the thread instead of restarting onboarding.
+  const [messages, setMessages] = useState<Msg[]>(
+    () => convo.getSnapshot().messages as Msg[],
+  );
   const [streamingText, setStreamingText] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [input, setInput] = useState('');
@@ -45,13 +51,17 @@ export default function OnboardingChat() {
     try {
       const res = await reidFetch('/api/reid', {
         method: 'POST',
-        body: JSON.stringify({ mode: 'onboarding', messages: seed }),
+        // Carry the shared session so the server appends to the SAME session
+        // row rather than minting a new one (the old restart bug).
+        body: JSON.stringify({ mode: 'onboarding', sessionId: convo.getSnapshot().sessionId, messages: seed }),
       });
       if (!res.ok) {
         let bodyText = '';
         try { bodyText = (await res.text()).slice(0, 200); } catch {}
         throw new Error(`HTTP ${res.status}${bodyText ? ` — ${bodyText}` : ''}`);
       }
+      const sid = res.headers.get('X-Reid-Session-Id') ?? res.headers.get('x-reid-session-id');
+      if (sid) convo.setSessionId(sid);
       const body = res.body as ReadableStream<Uint8Array> | null | undefined;
       if (body && typeof body.getReader === 'function') {
         const reader = body.getReader();
@@ -81,7 +91,9 @@ export default function OnboardingChat() {
 
     const close = stripSentinel(acc);
     const cleaned = close.hasSentinel ? close.body : acc;
-    setMessages((prev) => [...prev, { role: 'assistant', content: cleaned }]);
+    const assistantMsg: Msg = { role: 'assistant', content: cleaned };
+    setMessages((prev) => [...prev, assistantMsg]);
+    convo.append(assistantMsg);
     setStreamingText('');
     setIsStreaming(false);
 
@@ -114,15 +126,22 @@ export default function OnboardingChat() {
   useEffect(() => {
     if (streamStarted.current) return;
     streamStarted.current = true;
-    void runStream([]);
+    // Only have Reid open the conversation if there isn't one yet. If we
+    // arrived mid-voice-onboarding the thread already has his opener — auto-
+    // streaming here would start a SECOND onboarding. Wait for the user.
+    if (convo.getSnapshot().messages.length === 0) {
+      void runStream([]);
+    }
   }, []);
 
   async function handleSend() {
     const trimmed = input.trim();
     if (!trimmed || isStreaming || completing) return;
-    const next: Msg[] = [...messages, { role: 'user', content: trimmed }];
+    const userMsg: Msg = { role: 'user', content: trimmed };
+    const next: Msg[] = [...convo.getSnapshot().messages as Msg[], userMsg];
     setInput('');
     setMessages(next);
+    convo.append(userMsg);
     await runStream(next);
   }
 

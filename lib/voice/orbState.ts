@@ -1,6 +1,6 @@
 import type { VoiceState } from "./machine.ts";
 
-export type OrbVisual = "idle" | "listening" | "thinking" | "speaking";
+export type OrbVisual = "idle" | "listening" | "thinking" | "speaking" | "error";
 
 /** Map the session state + live amplitudes to the orb's visual state and the
  *  single amplitude value that drives it. */
@@ -16,6 +16,8 @@ export function mapOrbState(
       return { state: "thinking", amplitude: 0 };
     case "playing":
       return { state: "speaking", amplitude: playbackAmplitude };
+    case "error":
+      return { state: "error", amplitude: 0 };
     case "idle":
     default:
       return { state: "idle", amplitude: 0 };

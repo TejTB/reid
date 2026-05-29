@@ -6,13 +6,15 @@ import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { C, F } from "@/constants/theme";
 import LogoMark from "@/components/LogoMark";
-import ReidOrb from "@/components/ReidOrb";
+import ReidPulse from "@/components/ReidPulse";
+import Orb from "@/components/Orb";
 import { useVoiceSession } from "@/hooks/useVoiceSession";
 import { useOrbState } from "@/hooks/useOrbState";
 import * as convo from "@/lib/conversationStore";
 
 // Voice-first onboarding: Reid SPEAKS first, the user answers by voice.
-// Text onboarding (/onboarding/chat) is the quiet fallback.
+// Text onboarding (/onboarding/chat) is the quiet fallback — and continues the
+// SAME conversation (shared conversationStore + session), it does not restart.
 export default function OnboardingVoice() {
   const insets = useSafeAreaInsets();
   const vs = useVoiceSession({
@@ -28,7 +30,7 @@ export default function OnboardingVoice() {
 
   // On mount: fresh conversation, then Reid opens (speak-first).
   const started = useRef(false);
-  const { kickoff } = vs;
+  const { kickoff, hadExchangeRef } = vs;
   useEffect(() => {
     if (started.current) return;
     started.current = true;
@@ -36,8 +38,18 @@ export default function OnboardingVoice() {
     void kickoff();
   }, [kickoff]);
 
+  // Tap-to-act. In the error state, retry the right thing: if Reid never even
+  // opened (no exchange yet), retry the speak-first kickoff; otherwise let the
+  // user answer by recording.
+  const onOrbPress = () => {
+    if (vs.sessionState === "recording") return vs.stopRecording();
+    if (vs.sessionState === "error" && !hadExchangeRef.current) return vs.kickoff();
+    return vs.startSession();
+  };
+
   const status =
-    vs.sessionState === "recording" ? "listening…"
+    vs.error ? vs.error
+    : vs.sessionState === "recording" ? "listening…"
     : vs.sessionState === "processing" ? "thinking…"
     : vs.sessionState === "playing" ? ""
     : "tap to answer";
@@ -45,15 +57,25 @@ export default function OnboardingVoice() {
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <StatusBar style="light" />
-      <View style={{ paddingTop: insets.top + 12, paddingHorizontal: 20, height: 56 + insets.top, justifyContent: "center" }}>
-        <LogoMark size={28} />
+      <View style={{ paddingTop: insets.top + 12, paddingHorizontal: 20, height: 56 + insets.top, flexDirection: "row", alignItems: "center" }}>
+        <View style={{ flex: 1 }}><LogoMark size={28} /></View>
+        {/* Voice⇄text toggle — switch onboarding to text WITHOUT restarting it
+            (the text screen seeds from the shared conversation + session). */}
+        <Pressable
+          accessibilityLabel="Type instead"
+          onPress={() => router.replace("/onboarding/chat")}
+          hitSlop={12}
+          style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: C.border, backgroundColor: C.surface }}
+        >
+          <ReidPulse size={22} />
+        </Pressable>
       </View>
 
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <ReidOrb
+        <Orb
           state={orb.state}
           amplitude={orb.amplitude}
-          onPress={vs.sessionState === "recording" ? vs.stopRecording : vs.startSession}
+          onPress={onOrbPress}
         />
       </View>
 
@@ -72,15 +94,10 @@ export default function OnboardingVoice() {
         ) : null}
       </View>
 
-      <View style={{ height: 72, alignItems: "center", justifyContent: "center", gap: 10, paddingBottom: insets.bottom }}>
-        <Text style={{ fontFamily: F.sans, fontSize: 12, color: C.muted, letterSpacing: 0.5 }}>
+      <View style={{ height: 72, alignItems: "center", justifyContent: "center", paddingBottom: insets.bottom }}>
+        <Text style={{ fontFamily: F.sans, fontSize: 12, color: vs.error ? C.red : C.muted, letterSpacing: 0.5, textAlign: "center" }}>
           {status}
         </Text>
-        <Pressable onPress={() => router.replace("/onboarding/chat")} hitSlop={12}>
-          <Text style={{ fontFamily: F.sans, fontSize: 12, color: C.textDim, letterSpacing: 0.5 }}>
-            type instead
-          </Text>
-        </Pressable>
       </View>
     </View>
   );

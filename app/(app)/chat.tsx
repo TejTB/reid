@@ -8,6 +8,7 @@ import {
   Platform,
   Pressable,
   Alert,
+  AppState,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -23,9 +24,10 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { ArrowUp, Play, AudioLines } from 'lucide-react-native';
-import { Audio } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
+import type { AudioStatus } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -37,6 +39,7 @@ import type { Msg } from '@/lib/conversationStore';
 import * as convo from '@/lib/conversationStore';
 import { useConversation } from '@/hooks/useConversation';
 import { stripReidStream } from '@/lib/voice/strip';
+import { fireRecap } from '@/lib/recap';
 
 const VOICE_PREF_KEY = 'reid_voice_enabled';
 const LAST_SEEN_KEY = 'reid:lastSeenReidMessageAt';
@@ -250,7 +253,7 @@ export default function ChatScreen() {
   const [waveformActive, setWaveformActive] = useState(false);
   const [isPro, setIsPro] = useState(false);
   const [lastSessionAt, setLastSessionAt] = useState<string | null>(null);
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const soundRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
   const lastPlayedRef = useRef<string | null>(null);
   const flatListRef = useRef<FlatList<ChatItem> | null>(null);
 
@@ -300,20 +303,45 @@ export default function ChatScreen() {
   // Tear down any playing audio when the screen unmounts.
   useEffect(() => {
     return () => {
-      const s = soundRef.current;
-      if (s) {
-        void s.unloadAsync();
-      }
+      soundRef.current?.remove();
+      soundRef.current = null;
     };
+  }, []);
+
+  // Recap the shared session on leaving the text tab — mirrors the voice tab so
+  // a conversation that ends in text still gets a summary (and Reid remembers
+  // it). Guarded on a real exchange (at least one user turn).
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        const snap = convo.getSnapshot();
+        if (snap.sessionId && snap.messages.some((m) => m.role === 'user')) {
+          fireRecap(snap.sessionId);
+        }
+      };
+    }, []),
+  );
+
+  // ...and on app background / force-quit, so the summary isn't lost.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'background' || next === 'inactive') {
+        const snap = convo.getSnapshot();
+        if (snap.sessionId && snap.messages.some((m) => m.role === 'user')) {
+          fireRecap(snap.sessionId);
+        }
+      }
+    });
+    return () => sub.remove();
   }, []);
 
   const playMessage = useCallback(
     async (text: string, preview: boolean) => {
       if (soundRef.current) {
         try {
-          await soundRef.current.unloadAsync();
+          soundRef.current.remove();
         } catch {
-          // Sound may already be unloaded.
+          // Player may already be released.
         }
         soundRef.current = null;
       }
@@ -377,19 +405,25 @@ export default function ChatScreen() {
           return;
         }
 
-        const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true });
-        soundRef.current = sound;
-        sound.setOnPlaybackStatusUpdate((status) => {
-          if (!status.isLoaded) return;
+        // Ensure playback is audible even with the ringer switched to silent
+        // (expo-audio defaults to NOT playing in silent mode). doNotMix keeps
+        // Reid's voice primary on iOS.
+        await setAudioModeAsync({ playsInSilentMode: true, interruptionMode: 'doNotMix' });
+        const player = createAudioPlayer({ uri });
+        soundRef.current = player;
+        player.addListener('playbackStatusUpdate', (status: AudioStatus) => {
           if (status.didJustFinish) {
             setWaveformActive(false);
-            void sound.unloadAsync();
-            soundRef.current = null;
+            if (soundRef.current === player) {
+              player.remove();
+              soundRef.current = null;
+            }
             if (preview) {
               router.push('/upgrade');
             }
           }
         });
+        player.play();
       } catch {
         setWaveformActive(false);
       }

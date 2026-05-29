@@ -58,6 +58,9 @@ export function useVoiceSession(opts: VoiceSessionOptions = {}) {
   const [micAmplitude, setMicAmplitude] = useState(0);
   const [playbackAmplitude, setPlaybackAmplitude] = useState(0);
   const [voiceBlocked, setVoiceBlocked] = useState(false);
+  // User-facing recovery copy for the `error` FSM state. Null when healthy.
+  // Every failure path sets this so the orb is never a dead end.
+  const [error, setError] = useState<string | null>(null);
 
   const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
   const recorderState = useAudioRecorderState(recorder, SAMPLE_MS);
@@ -99,11 +102,15 @@ export function useVoiceSession(opts: VoiceSessionOptions = {}) {
     setMicAmplitude(0);
     try {
       await recorder.stop();
-      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+      // Back to a playback-allowing session before Reid speaks. interruptionMode
+      // is required on iOS: without it the category can stay .playAndRecord and
+      // route Reid's voice to the earpiece (effectively silent on speaker).
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, interruptionMode: "doNotMix" });
       const uri = recorder.uri;
       if (!uri) throw new Error("no recording uri");
       await runTurn(uri);
     } catch {
+      setError("I lost the connection. Tap to try again.");
       dispatch({ type: "ERROR" });
     } finally {
       busyRef.current = false;
@@ -128,15 +135,21 @@ export function useVoiceSession(opts: VoiceSessionOptions = {}) {
   }, [recorderState, state]);
 
   const startSession = useCallback(async () => {
-    if (stateRef.current !== "idle" || busyRef.current) return;
+    // Allow a tap to retry from the recoverable error state, not just idle.
+    if ((stateRef.current !== "idle" && stateRef.current !== "error") || busyRef.current) return;
     if (voiceBlocked) { router.push("/upgrade"); return; }
     busyRef.current = true;
     try {
       const perm = await AudioModule.requestRecordingPermissionsAsync();
-      if (!perm.granted) { setTranscript("Microphone permission denied."); return; }
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      if (!perm.granted) {
+        setError("Microphone access is needed to talk to Reid.");
+        dispatch({ type: "ERROR" });
+        return;
+      }
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true, interruptionMode: "duckOthers" });
       levelsRef.current = [];
       startedAtRef.current = Date.now();
+      setError(null);
       setTranscript("");
       setReidResponse("");
       await recorder.prepareToRecordAsync();
@@ -193,17 +206,24 @@ export function useVoiceSession(opts: VoiceSessionOptions = {}) {
     form.append("file", { uri, name: "speech.m4a", type: "audio/m4a" } as unknown as Blob);
     const tRes = await reidFetch("/api/transcribe", { method: "POST", body: form });
     if (!tRes.ok) {
+      setError(tRes.status === 429 ? "Slow down — give me a second, then tap to try again." : "I couldn't hear that. Tap to try again.");
       dispatch({ type: "ERROR" });
-      setTranscript(tRes.status === 429 ? "Slow down — try again in a moment." : "Could not hear that.");
       return;
     }
     const { transcript: text } = (await tRes.json()) as { transcript: string };
-    if (!text.trim()) { dispatch({ type: "RESET" }); return; }
+    if (!text.trim()) {
+      // Empty result (silence / noise) used to RESET silently — the orb just
+      // snapped back with no explanation. Tell the user and let them retry.
+      setError("I didn't catch that. Tap to try again.");
+      dispatch({ type: "ERROR" });
+      return;
+    }
+    setError(null);
     setTranscript(text);
     convo.append({ role: "user", content: text });
 
-    const out = await streamReid();
-    if (!out) { dispatch({ type: "ERROR" }); convo.dropLast(); return; }
+    const out = await streamReid().catch(() => null);
+    if (!out) { setError("Something glitched on my end. Tap to try again."); dispatch({ type: "ERROR" }); convo.dropLast(); return; }
     convo.append({ role: "assistant", content: out.reply });
     hadExchangeRef.current = true;
     if (out.complete) completeRef.current = true;
@@ -215,15 +235,19 @@ export function useVoiceSession(opts: VoiceSessionOptions = {}) {
   // Speak-first opening: Reid talks before the user records (onboarding /
   // first contact). idle → processing (OPENING) → playing.
   const kickoff = useCallback(async () => {
-    if (stateRef.current !== "idle" || busyRef.current) return;
+    // Retry-able from the error state too (OPENING → processing).
+    if ((stateRef.current !== "idle" && stateRef.current !== "error") || busyRef.current) return;
     busyRef.current = true;
     try {
       dispatch({ type: "OPENING" });
+      setError(null);
       // Speak-first never records, so set the playback audio mode here
       // (startSession does this for the record-first path).
-      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
-      const out = await streamReid();
-      if (!out) { dispatch({ type: "ERROR" }); return; }
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, interruptionMode: "doNotMix" });
+      // CRITICAL: catch so a network throw can't strand the orb in "thinking"
+      // forever (the previous code only handled a null return, not a throw).
+      const out = await streamReid().catch(() => null);
+      if (!out) { setError("I lost the connection. Tap to try again."); dispatch({ type: "ERROR" }); return; }
       convo.append({ role: "assistant", content: out.reply });
       hadExchangeRef.current = true;
       if (out.complete) completeRef.current = true;
@@ -237,8 +261,16 @@ export function useVoiceSession(opts: VoiceSessionOptions = {}) {
 
   async function playReply(text: string) {
     try {
-      const res = await reidFetch("/api/tts", { method: "POST", body: JSON.stringify({ text }) });
-      if (!res.ok) { dispatch({ type: "PLAYBACK_DONE" }); return; }
+      // preview+full: bypass the Pro gate (preview) WITHOUT the 12-word
+      // truncation (full) — Reid speaks his whole reply. See /api/tts.
+      const res = await reidFetch("/api/tts", { method: "POST", body: JSON.stringify({ text, preview: true, full: true }) });
+      if (!res.ok) {
+        // Reid's text is already on screen; audio just failed. Soft-land to
+        // idle with a quiet note rather than dropping to silence with no clue.
+        setError("I couldn't play that out loud — you can still read it.");
+        dispatch({ type: "PLAYBACK_DONE" });
+        return;
+      }
       const buf = await res.arrayBuffer();
       const dir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
       if (!dir) { dispatch({ type: "PLAYBACK_DONE" }); return; }
@@ -272,15 +304,30 @@ export function useVoiceSession(opts: VoiceSessionOptions = {}) {
       // Shaped speech-envelope (not random) drives the SPEAKING orb amplitude.
       const playStart = Date.now();
       pulseRef.current = setInterval(() => setPlaybackAmplitude(speechEnvelope(Date.now() - playStart)), 80);
+
+      // Adaptive watchdog. A long reply can be ~60s of audio, so a fixed short
+      // timeout would clip it; a fixed long one strands the orb on a decode
+      // error. Start generous, then tighten to the real duration once known,
+      // and bail early if the player drops its loaded state after starting.
+      let durationApplied = false;
+      let startedPlaying = false;
       const sub = player.addListener("playbackStatusUpdate", (s: AudioStatus) => {
-        if (s.didJustFinish) finishPlayback();
+        if (!durationApplied && s.duration > 0) {
+          durationApplied = true;
+          if (watchdogRef.current) clearTimeout(watchdogRef.current);
+          watchdogRef.current = setTimeout(finishPlayback, s.duration * 1000 + 4000);
+        }
+        if (s.playing) startedPlaying = true;
+        if (s.didJustFinish) { finishPlayback(); return; }
+        // Decode error / route loss after playback began: don't hang.
+        if (startedPlaying && s.isLoaded === false && !s.isBuffering) finishPlayback();
       });
       subRef.current = sub;
-      // Watchdog: if playback never reports completion (interruption, decode
-      // error, audio-route change), don't strand the FSM in "playing".
-      watchdogRef.current = setTimeout(finishPlayback, 60000);
+      // Safety cap until the real duration arrives (longer than any reply).
+      watchdogRef.current = setTimeout(finishPlayback, 90000);
       player.play();
     } catch {
+      setError("I couldn't play that out loud — you can still read it.");
       dispatch({ type: "PLAYBACK_DONE" });
     }
   }
@@ -296,6 +343,7 @@ export function useVoiceSession(opts: VoiceSessionOptions = {}) {
     sessionState: state,
     transcript,
     reidResponse,
+    error,
     micAmplitude,
     playbackAmplitude,
     voiceBlocked,
