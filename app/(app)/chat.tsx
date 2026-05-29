@@ -25,7 +25,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
 import { router, useFocusEffect } from 'expo-router';
-import { ArrowUp, Play, AudioLines } from 'lucide-react-native';
+import { ArrowUp, Play } from 'lucide-react-native';
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import type { AudioStatus } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -35,6 +35,7 @@ import { reidFetch } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { C, F, R } from '@/constants/theme';
 import ReidThinking from '@/components/ReidThinking';
+import ModeToggle from '@/components/ModeToggle';
 import type { Msg } from '@/lib/conversationStore';
 import * as convo from '@/lib/conversationStore';
 import { useConversation } from '@/hooks/useConversation';
@@ -582,13 +583,6 @@ export default function ChatScreen() {
           borderBottomColor: C.border,
         }}
       >
-        <Pressable
-          onPress={() => router.replace('/(app)/reid')}
-          hitSlop={12}
-          style={{ marginRight: 14 }}
-        >
-          <AudioLines size={24} color={C.muted} />
-        </Pressable>
         <View style={{ flex: 1 }}>
           <Text style={{ fontFamily: F.serifReg, fontSize: 18, color: C.text }}>Reid</Text>
           <Text style={{ fontFamily: F.sans, fontSize: 12, color: C.muted, marginTop: 2 }}>
@@ -599,7 +593,7 @@ export default function ChatScreen() {
           onPress={onHearReid}
           disabled={!lastReid || waveformActive}
           style={{
-            paddingHorizontal: 14,
+            paddingHorizontal: 12,
             paddingVertical: 8,
             borderRadius: R.pill,
             borderWidth: 1,
@@ -608,6 +602,7 @@ export default function ChatScreen() {
             flexDirection: 'row',
             alignItems: 'center',
             gap: 6,
+            marginRight: 10,
           }}
         >
           {waveformActive ? (
@@ -628,6 +623,14 @@ export default function ChatScreen() {
             </>
           )}
         </Pressable>
+        {/* Voice⇄text toggle — continues the SAME conversation (shared
+            conversationStore + session); just switches modality. */}
+        <ModeToggle
+          mode="text"
+          onChange={(m) => {
+            if (m === 'voice') router.replace('/(app)/reid');
+          }}
+        />
       </View>
 
       <FlatList

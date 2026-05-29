@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Settings } from "lucide-react-native";
 import { C, F } from "@/constants/theme";
 import LogoMark from "@/components/LogoMark";
-import ReidPulse from "@/components/ReidPulse";
+import ModeToggle from "@/components/ModeToggle";
 import Orb from "@/components/Orb";
 import { useVoiceSession } from "@/hooks/useVoiceSession";
 import { useOrbState } from "@/hooks/useOrbState";
@@ -65,19 +65,17 @@ export default function ReidScreen() {
       <StatusBar style="light" />
       <View style={{ paddingTop: insets.top + 12, paddingHorizontal: 20, height: 56 + insets.top, flexDirection: "row", alignItems: "center" }}>
         <View style={{ flex: 1 }}><LogoMark size={28} /></View>
-        <Pressable onPress={() => router.push("/(app)/plan")} hitSlop={12} style={{ marginRight: 18 }}>
+        <Pressable onPress={() => router.push("/(app)/plan")} hitSlop={12} style={{ marginRight: 16 }}>
           <Settings size={22} color={C.textDim} />
         </Pressable>
-        {/* Voice⇄text toggle. The pulsing Reid mark signals voice is the active
-            mode; tapping continues the SAME conversation/session in text. */}
-        <Pressable
-          accessibilityLabel="Switch to text"
-          onPress={() => router.push("/(app)/chat")}
-          hitSlop={12}
-          style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: C.border, backgroundColor: C.surface }}
-        >
-          <ReidPulse size={22} />
-        </Pressable>
+        {/* Voice⇄text toggle. Same continuous conversation (shared
+            conversationStore + session) — switching only changes modality. */}
+        <ModeToggle
+          mode="voice"
+          onChange={(m) => {
+            if (m === "text") router.push("/(app)/chat");
+          }}
+        />
       </View>
 
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
